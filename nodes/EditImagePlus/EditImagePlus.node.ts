@@ -195,12 +195,25 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Background fill colour for the template canvas',
 	},
 	{
+		displayName: 'Layout Type',
+		name: 'templateLayout',
+		type: 'options',
+		options: [
+			{ name: 'Standard (Title & Subtitle)', value: 'standard' },
+			{ name: 'Quote', value: 'quote' },
+			{ name: 'Meme (Top & Bottom Text)', value: 'meme' },
+		],
+		default: 'standard',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'The layout of the text on the canvas',
+	},
+	{
 		displayName: 'Title Text',
 		name: 'templateTitle',
 		type: 'string',
 		default: '',
 		placeholder: 'e.g. My Brand',
-		displayOptions: { show: { operation: ['template'] } },
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
 		description: 'Primary headline text (leave blank to skip)',
 	},
 	{
@@ -208,8 +221,8 @@ const nodeOperationOptions: INodeProperties[] = [
 		name: 'templateTitleColor',
 		type: 'color',
 		default: '#ffffff',
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'Title text colour',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard', 'quote', 'meme'] } },
+		description: 'Primary text colour',
 	},
 	{
 		displayName: 'Subtitle Text',
@@ -217,7 +230,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		placeholder: 'e.g. Your tagline here',
-		displayOptions: { show: { operation: ['template'] } },
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
 		description: 'Secondary subtitle text (leave blank to skip)',
 	},
 	{
@@ -225,8 +238,8 @@ const nodeOperationOptions: INodeProperties[] = [
 		name: 'templateSubtitleColor',
 		type: 'color',
 		default: '#cccccc',
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'Subtitle text colour',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard', 'quote'] } },
+		description: 'Secondary text colour',
 	},
 	{
 		displayName: 'Quote Text',
@@ -235,7 +248,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		typeOptions: { rows: 4 },
 		default: '',
 		placeholder: 'e.g. "To be or not to be..."',
-		displayOptions: { show: { operation: ['template'] } },
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
 		description: 'A centered quote to display on the template. Wraps automatically.',
 	},
 	{
@@ -244,8 +257,26 @@ const nodeOperationOptions: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		placeholder: 'e.g. William Shakespeare',
-		displayOptions: { show: { operation: ['template'] } },
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
 		description: 'The author of the quote, displayed centered at the bottom',
+	},
+	{
+		displayName: 'Top Text',
+		name: 'templateMemeTop',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. WHEN YOU REALIZE...',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
+		description: 'Text displayed at the top of the meme',
+	},
+	{
+		displayName: 'Bottom Text',
+		name: 'templateMemeBottom',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. ITS FRIDAY',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
+		description: 'Text displayed at the bottom of the meme',
 	},
 	{
 		displayName: 'Accent Color',
@@ -1124,7 +1155,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sepia: [],
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateTitle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteAuthor', 'templateAccentColor'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateLayout', 'templateTitle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteAuthor', 'templateMemeTop', 'templateMemeBottom', 'templateAccentColor'],
 		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
@@ -1154,6 +1185,8 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const height = templateName === 'Custom' ? (op.customHeight as number ?? 600) : tpl.height;
 
 	const bg = hexToRgba(op.templateBgColor as string ?? '#1a1a2e');
+	const layout = op.templateLayout as string ?? 'standard';
+	
 	const titleText = escapeSvg((op.templateTitle as string ?? '').trim());
 	const subtitleText = escapeSvg((op.templateSubtitle as string ?? '').trim());
 	const titleColor = op.templateTitleColor as string ?? '#ffffff';
@@ -1162,6 +1195,9 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	
 	const quoteText = escapeSvg((op.templateQuote as string ?? '').trim());
 	const quoteAuthor = escapeSvg((op.templateQuoteAuthor as string ?? '').trim());
+
+	const memeTop = escapeSvg((op.templateMemeTop as string ?? '').toUpperCase().trim());
+	const memeBottom = escapeSvg((op.templateMemeBottom as string ?? '').toUpperCase().trim());
 
 	// Responsive font sizes
 	const titleFontSize = Math.max(24, Math.round(width * 0.065));
@@ -1177,7 +1213,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const accentBarY = titleY - titleFontSize * 1.4;
 
 	let titleSvg = '';
-	if (titleText) {
+	if (titleText && layout === 'standard') {
 		titleSvg = `
 		<text
 			x="${padding}" y="${titleY}"
@@ -1190,7 +1226,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	}
 
 	let subtitleSvg = '';
-	if (subtitleText) {
+	if (subtitleText && layout === 'standard') {
 		subtitleSvg = `
 		<text
 			x="${padding}" y="${subtitleY}"
@@ -1202,7 +1238,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	}
 
 	let quoteSvg = '';
-	if (quoteText) {
+	if (quoteText && layout === 'quote') {
 		const qFontSize = Math.max(24, Math.round(width * 0.055));
 		const maxCharsPerLine = Math.floor(width / (qFontSize * 0.6));
 		const words = quoteText.split(' ');
@@ -1235,7 +1271,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	}
 
 	let authorSvg = '';
-	if (quoteAuthor) {
+	if (quoteAuthor && layout === 'quote') {
 		const aFontSize = Math.max(16, Math.round(width * 0.035));
 		authorSvg = `
 		<text
@@ -1246,6 +1282,37 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			text-anchor="middle"
 			opacity="0.9"
 		>— ${quoteAuthor}</text>`;
+	}
+
+	let memeSvg = '';
+	if (layout === 'meme') {
+		const mFontSize = Math.max(30, Math.round(height * 0.1));
+		if (memeTop) {
+			memeSvg += `
+			<text
+				x="${width / 2}" y="${mFontSize * 1.1}"
+				font-family="Impact, sans-serif"
+				font-size="${mFontSize}"
+				font-weight="bold"
+				fill="${titleColor}"
+				stroke="#000000"
+				stroke-width="${Math.max(1, Math.round(mFontSize * 0.05))}"
+				text-anchor="middle"
+			>${memeTop}</text>`;
+		}
+		if (memeBottom) {
+			memeSvg += `
+			<text
+				x="${width / 2}" y="${height - (mFontSize * 0.3)}"
+				font-family="Impact, sans-serif"
+				font-size="${mFontSize}"
+				font-weight="bold"
+				fill="${titleColor}"
+				stroke="#000000"
+				stroke-width="${Math.max(1, Math.round(mFontSize * 0.05))}"
+				text-anchor="middle"
+			>${memeBottom}</text>`;
+		}
 	}
 
 	const svg = `
@@ -1271,6 +1338,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
   ${subtitleSvg}
   ${quoteSvg}
   ${authorSvg}
+  ${memeSvg}
   <!-- Corner decoration -->
   <rect x="${width - 60}" y="${height - 60}" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
   <rect x="${width - 24}" y="${height - 60}" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>
