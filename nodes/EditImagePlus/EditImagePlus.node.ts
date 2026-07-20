@@ -1,841 +1,804 @@
 import type {
 	IDataObject,
 	IExecuteFunctions,
-	ILoadOptionsFunctions,
 	INodeExecutionData,
 	INodeProperties,
 	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { deepCopy } from 'n8n-workflow';
-import gm from 'gm';
-import { file } from 'tmp-promise';
-import { parse as pathParse } from 'path';
-import { writeFile as fsWriteFile } from 'fs';
-import { promisify } from 'util';
-const fsWriteFileAsync = promisify(fsWriteFile);
-import getSystemFonts from 'get-system-fonts';
+import { NodeConnectionType, NodeOperationError, deepCopy } from 'n8n-workflow';
+import sharp from 'sharp';
 
-const nodeOperations: INodePropertyOptions[] = [
-	{
-		name: 'Blur',
-		value: 'blur',
-		description: 'Adds a blur to the image and so makes it less sharp',
-		action: 'Blur Image',
-	},
-	{
-		name: 'Border',
-		value: 'border',
-		description: 'Adds a border to the image',
-		action: 'Border Image',
-	},
-	{
-		name: 'Composite',
-		value: 'composite',
-		description: 'Composite image on top of another one',
-		action: 'Composite Image',
-	},
-	{
-		name: 'Create',
-		value: 'create',
-		description: 'Create a new image',
-		action: 'Create Image',
-	},
-	{
-		name: 'Crop',
-		value: 'crop',
-		description: 'Crops the image',
-		action: 'Crop Image',
-	},
-	{
-		name: 'Draw',
-		value: 'draw',
-		description: 'Draw on image',
-		action: 'Draw Image',
-	},
-	{
-		name: 'Rotate',
-		value: 'rotate',
-		description: 'Rotate image',
-		action: 'Rotate Image',
-	},
-	{
-		name: 'Resize',
-		value: 'resize',
-		description: 'Change the size of image',
-		action: 'Resize Image',
-	},
-	{
-		name: 'Shear',
-		value: 'shear',
-		description: 'Shear image along the X or Y axis',
-		action: 'Shear Image',
-	},
-	{
-		name: 'Text',
-		value: 'text',
-		description: 'Adds text to image',
-		action: 'Apply Text to Image',
-	},
-	{
-		name: 'Transparent',
-		value: 'transparent',
-		description: 'Make a color in image transparent',
-		action: 'Add Transparency to Image',
-	},
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a CSS-style hex colour (#RRGGBB or #RRGGBBAA) to a sharp RGBA object.
+ */
+function hexToRgba(hex: string): { r: number; g: number; b: number; alpha: number } {
+	const clean = hex.replace('#', '');
+	const r = parseInt(clean.substring(0, 2), 16) || 0;
+	const g = parseInt(clean.substring(2, 4), 16) || 0;
+	const b = parseInt(clean.substring(4, 6), 16) || 0;
+	const alpha = clean.length === 8 ? (parseInt(clean.substring(6, 8), 16) || 255) / 255 : 1;
+	return { r, g, b, alpha };
+}
+
+/**
+ * Word-wraps text to a maximum number of characters per line.
+ */
+function wrapText(text: string, maxLineLength: number): string {
+	const lines: string[] = [];
+	for (const paragraph of text.split('\n')) {
+		let current = '';
+		for (const word of paragraph.split(' ')) {
+			if (current.length + word.length + 1 > maxLineLength && current.length > 0) {
+				lines.push(current.trimEnd());
+				current = word + ' ';
+			} else {
+				current += word + ' ';
+			}
+		}
+		lines.push(current.trimEnd());
+	}
+	return lines.join('\n');
+}
+
+/**
+ * Escapes characters that would break inline SVG.
+ */
+function escapeSvg(str: string): string {
+	return str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&apos;');
+}
+
+// ---------------------------------------------------------------------------
+// Templates definition
+// ---------------------------------------------------------------------------
+
+interface ImageTemplate {
+	name: string;
+	width: number;
+	height: number;
+	description: string;
+}
+
+const IMAGE_TEMPLATES: ImageTemplate[] = [
+	{ name: 'Instagram Post (1:1)', width: 1080, height: 1080, description: 'Instagram square post' },
+	{ name: 'Instagram Story (9:16)', width: 1080, height: 1920, description: 'Instagram/TikTok story' },
+	{ name: 'Instagram Portrait (4:5)', width: 1080, height: 1350, description: 'Instagram portrait' },
+	{ name: 'Twitter/X Post (16:9)', width: 1200, height: 675, description: 'Twitter card image' },
+	{ name: 'YouTube Thumbnail', width: 1280, height: 720, description: 'YouTube video thumbnail' },
+	{ name: 'Facebook Post', width: 1200, height: 630, description: 'Facebook link preview' },
+	{ name: 'LinkedIn Banner', width: 1584, height: 396, description: 'LinkedIn profile banner' },
+	{ name: 'LinkedIn Post', width: 1200, height: 627, description: 'LinkedIn post image' },
+	{ name: 'Pinterest Pin', width: 1000, height: 1500, description: 'Pinterest tall pin' },
+	{ name: 'Open Graph (OG)', width: 1200, height: 630, description: 'General Open Graph image' },
+	{ name: 'Email Header', width: 600, height: 200, description: 'Email header banner' },
+	{ name: 'Presentation Slide (16:9)', width: 1920, height: 1080, description: 'Full-HD slide' },
+	{ name: 'Business Card', width: 1050, height: 600, description: 'Standard business card' },
+	{ name: 'A4 Document', width: 2480, height: 3508, description: 'A4 at 300 DPI' },
+	{ name: 'Custom', width: 800, height: 600, description: 'Enter your own dimensions' },
 ];
 
+// ---------------------------------------------------------------------------
+// Operations options list
+// ---------------------------------------------------------------------------
+
+const nodeOperations: INodePropertyOptions[] = [
+	{ name: 'Blur', value: 'blur', description: 'Apply Gaussian blur to the image', action: 'Blur image' },
+	{ name: 'Border', value: 'border', description: 'Add a solid-colour border', action: 'Add border' },
+	{ name: 'Composite', value: 'composite', description: 'Overlay one image on top of another', action: 'Composite image' },
+	{ name: 'Create', value: 'create', description: 'Generate a blank canvas', action: 'Create image' },
+	{ name: 'Crop', value: 'crop', description: 'Extract a region from the image', action: 'Crop image' },
+	{ name: 'Draw', value: 'draw', description: 'Draw shapes (rectangle, circle, line)', action: 'Draw on image' },
+	{ name: 'Flip', value: 'flip', description: 'Flip the image vertically (top ↔ bottom)', action: 'Flip image' },
+	{ name: 'Flop', value: 'flop', description: 'Flop the image horizontally (left ↔ right)', action: 'Flop image' },
+	{ name: 'Gamma', value: 'gamma', description: 'Apply gamma correction', action: 'Apply gamma' },
+	{ name: 'Grayscale', value: 'grayscale', description: 'Convert image to grayscale', action: 'Convert to grayscale' },
+	{ name: 'Normalize', value: 'normalize', description: 'Stretch contrast to full dynamic range', action: 'Normalize image' },
+	{ name: 'Rotate', value: 'rotate', description: 'Rotate the image by an angle', action: 'Rotate image' },
+	{ name: 'Resize', value: 'resize', description: 'Change image dimensions', action: 'Resize image' },
+	{ name: 'Sepia', value: 'sepia', description: 'Apply a warm sepia tone', action: 'Apply sepia tone' },
+	{ name: 'Sharpen', value: 'sharpen', description: 'Increase image sharpness', action: 'Sharpen image' },
+	{ name: 'Shear', value: 'shear', description: 'Shear the image along X or Y axis', action: 'Shear image' },
+	{ name: 'Template', value: 'template', description: 'Create from a preset canvas template', action: 'Create from template' },
+	{ name: 'Text', value: 'text', description: 'Render text onto the image', action: 'Add text' },
+	{ name: 'Tint', value: 'tint', description: 'Apply a colour tint', action: 'Tint image' },
+	{ name: 'Transparent', value: 'transparent', description: 'Make the image background transparent (PNG)', action: 'Make transparent' },
+	{ name: 'Watermark', value: 'watermark', description: 'Overlay a watermark image with configurable opacity', action: 'Add watermark' },
+];
+
+// ---------------------------------------------------------------------------
+// Per-operation parameter definitions
+// ---------------------------------------------------------------------------
+
 const nodeOperationOptions: INodeProperties[] = [
-	// ----------------------------------
-	//         create
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// create
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Background Color',
 		name: 'backgroundColor',
 		type: 'color',
-		default: '#ffffff00',
-		typeOptions: {
-			showAlpha: true,
-		},
-		displayOptions: {
-			show: {
-				operation: ['create'],
-			},
-		},
-		description: 'The background color of the image to create',
+		default: '#ffffff',
+		typeOptions: { showAlpha: true },
+		displayOptions: { show: { operation: ['create'] } },
+		description: 'Background colour of the new image',
 	},
 	{
 		displayName: 'Image Width',
 		name: 'width',
 		type: 'number',
-		default: 50,
-		typeOptions: {
-			minValue: 1,
-		},
-		displayOptions: {
-			show: {
-				operation: ['create'],
-			},
-		},
-		description: 'The width of the image to create',
+		default: 1080,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['create'] } },
+		description: 'Width of the new image in pixels',
 	},
 	{
 		displayName: 'Image Height',
 		name: 'height',
 		type: 'number',
-		default: 50,
-		typeOptions: {
-			minValue: 1,
-		},
-		displayOptions: {
-			show: {
-				operation: ['create'],
-			},
-		},
-		description: 'The height of the image to create',
+		default: 1080,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['create'] } },
+		description: 'Height of the new image in pixels',
 	},
 
-	// ----------------------------------
-	//         draw
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// template
+	// ────────────────────────────────────────────────────────────────────────
+	{
+		displayName: 'Template',
+		name: 'templateName',
+		type: 'options',
+		default: 'Instagram Post (1:1)',
+		displayOptions: { show: { operation: ['template'] } },
+		options: IMAGE_TEMPLATES.map((t) => ({
+			name: `${t.name} (${t.width}×${t.height})`,
+			value: t.name,
+			description: t.description,
+		})),
+		description: 'Choose a preset canvas size',
+	},
+	{
+		displayName: 'Custom Width',
+		name: 'customWidth',
+		type: 'number',
+		default: 800,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['template'], templateName: ['Custom'] } },
+		description: 'Custom canvas width in pixels',
+	},
+	{
+		displayName: 'Custom Height',
+		name: 'customHeight',
+		type: 'number',
+		default: 600,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['template'], templateName: ['Custom'] } },
+		description: 'Custom canvas height in pixels',
+	},
+	{
+		displayName: 'Background Color',
+		name: 'templateBgColor',
+		type: 'color',
+		default: '#1a1a2e',
+		typeOptions: { showAlpha: false },
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Background fill colour for the template canvas',
+	},
+	{
+		displayName: 'Title Text',
+		name: 'templateTitle',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. My Brand',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Primary headline text (leave blank to skip)',
+	},
+	{
+		displayName: 'Title Color',
+		name: 'templateTitleColor',
+		type: 'color',
+		default: '#ffffff',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Title text colour',
+	},
+	{
+		displayName: 'Subtitle Text',
+		name: 'templateSubtitle',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. Your tagline here',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Secondary subtitle text (leave blank to skip)',
+	},
+	{
+		displayName: 'Subtitle Color',
+		name: 'templateSubtitleColor',
+		type: 'color',
+		default: '#cccccc',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Subtitle text colour',
+	},
+	{
+		displayName: 'Accent Color',
+		name: 'templateAccentColor',
+		type: 'color',
+		default: '#e94560',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Accent bar / decorative element colour',
+	},
+
+	// ────────────────────────────────────────────────────────────────────────
+	// draw
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Primitive',
 		name: 'primitive',
 		type: 'options',
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-			},
-		},
+		displayOptions: { show: { operation: ['draw'] } },
 		options: [
-			{
-				name: 'Circle',
-				value: 'circle',
-			},
-			{
-				name: 'Line',
-				value: 'line',
-			},
-			{
-				name: 'Rectangle',
-				value: 'rectangle',
-			},
+			{ name: 'Circle', value: 'circle' },
+			{ name: 'Line', value: 'line' },
+			{ name: 'Rectangle', value: 'rectangle' },
 		],
 		default: 'rectangle',
-		description: 'The primitive to draw',
+		description: 'Shape to draw',
 	},
 	{
 		displayName: 'Color',
 		name: 'color',
 		type: 'color',
-		default: '#ff000000',
-		typeOptions: {
-			showAlpha: true,
-		},
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-			},
-		},
-		description: 'The color of the primitive to draw',
+		default: '#ff0000',
+		typeOptions: { showAlpha: true },
+		displayOptions: { show: { operation: ['draw'] } },
+		description: 'Fill colour of the shape',
+	},
+	{
+		displayName: 'Stroke Color',
+		name: 'strokeColor',
+		type: 'color',
+		default: '#000000',
+		typeOptions: { showAlpha: true },
+		displayOptions: { show: { operation: ['draw'] } },
+		description: 'Outline stroke colour (set alpha to 0 for no stroke)',
+	},
+	{
+		displayName: 'Stroke Width',
+		name: 'strokeWidth',
+		type: 'number',
+		default: 0,
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { operation: ['draw'] } },
+		description: 'Width of the stroke outline in pixels (0 = no stroke)',
 	},
 	{
 		displayName: 'Start Position X',
 		name: 'startPositionX',
 		type: 'number',
 		default: 50,
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-				primitive: ['circle', 'line', 'rectangle'],
-			},
-		},
-		description: 'X (horizontal) start position of the primitive',
+		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
+		description: 'X start position of the shape',
 	},
 	{
 		displayName: 'Start Position Y',
 		name: 'startPositionY',
 		type: 'number',
 		default: 50,
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-				primitive: ['circle', 'line', 'rectangle'],
-			},
-		},
-		description: 'Y (horizontal) start position of the primitive',
+		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
+		description: 'Y start position of the shape',
 	},
 	{
 		displayName: 'End Position X',
 		name: 'endPositionX',
 		type: 'number',
 		default: 250,
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-				primitive: ['circle', 'line', 'rectangle'],
-			},
-		},
-		description: 'X (horizontal) end position of the primitive',
+		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
+		description: 'X end position of the shape',
 	},
 	{
 		displayName: 'End Position Y',
 		name: 'endPositionY',
 		type: 'number',
 		default: 250,
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-				primitive: ['circle', 'line', 'rectangle'],
-			},
-		},
-		description: 'Y (horizontal) end position of the primitive',
+		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
+		description: 'Y end position of the shape',
 	},
 	{
 		displayName: 'Corner Radius',
 		name: 'cornerRadius',
 		type: 'number',
 		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['draw'],
-				primitive: ['rectangle'],
-			},
-		},
-		description: 'The radius of the corner to create round corners',
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { operation: ['draw'], primitive: ['rectangle'] } },
+		description: 'Radius for rounded rectangle corners',
 	},
 
-	// ----------------------------------
-	//         text
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// text
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Text',
 		name: 'text',
-		typeOptions: {
-			rows: 5,
-		},
 		type: 'string',
+		typeOptions: { rows: 4 },
 		default: '',
 		placeholder: 'Text to render',
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Text to write on the image',
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Text content to add to the image',
 	},
 	{
 		displayName: 'Font Size',
 		name: 'fontSize',
 		type: 'number',
-		default: 18,
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Size of the text',
+		default: 48,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Font size in pixels',
 	},
 	{
 		displayName: 'Font Color',
 		name: 'fontColor',
 		type: 'color',
-		default: '#000000',
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Color of the text',
+		default: '#ffffff',
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Text colour',
+	},
+	{
+		displayName: 'Font Weight',
+		name: 'fontWeight',
+		type: 'options',
+		default: 'normal',
+		displayOptions: { show: { operation: ['text'] } },
+		options: [
+			{ name: 'Normal', value: 'normal' },
+			{ name: 'Bold', value: 'bold' },
+		],
+		description: 'Font weight',
+	},
+	{
+		displayName: 'Font Style',
+		name: 'fontStyle',
+		type: 'options',
+		default: 'normal',
+		displayOptions: { show: { operation: ['text'] } },
+		options: [
+			{ name: 'Normal', value: 'normal' },
+			{ name: 'Italic', value: 'italic' },
+		],
+		description: 'Font style',
+	},
+	{
+		displayName: 'Text Align',
+		name: 'textAlign',
+		type: 'options',
+		default: 'center',
+		displayOptions: { show: { operation: ['text'] } },
+		options: [
+			{ name: 'Left', value: 'start' },
+			{ name: 'Center', value: 'middle' },
+			{ name: 'Right', value: 'end' },
+		],
+		description: 'Horizontal text alignment',
 	},
 	{
 		displayName: 'Position X',
 		name: 'positionX',
 		type: 'number',
-		default: 50,
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'X (horizontal) position of the text',
+		default: 540,
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'X coordinate of the text anchor point',
 	},
 	{
 		displayName: 'Position Y',
 		name: 'positionY',
 		type: 'number',
-		default: 50,
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Y (vertical) position of the text',
+		default: 540,
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Y coordinate of the text anchor point (baseline)',
 	},
 	{
-		displayName: 'Width',
-		name: 'width',
+		displayName: 'Line Height',
+		name: 'lineHeight',
 		type: 'number',
-		default: 150,
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Text width',
+		default: 1.4,
+		typeOptions: { minValue: 0.5, maxValue: 5, numberPrecision: 1 },
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Line height multiplier (e.g. 1.4 = 140% of font size)',
 	},
 	{
-		displayName: 'Height',
-		name: 'height',
-		type: 'number',
-		default: 50,
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Text height',
-	},
-	{
-		displayName: 'Gravity',
-		name: 'gravity',
-		type: 'options',
-		default: 'Center',
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Text Align',
-		options: [
-			{
-				name: 'Center',
-				value: 'Center',
-				description: 'Center Text Position',
-			},
-			{
-				name: 'East',
-				value: 'East',
-				description: 'East Text Position',
-			},
-			{
-				name: 'North',
-				value: 'North',
-				description: 'North Text',
-			},
-			{
-				name: 'NorthEast',
-				value: 'NorthEast',
-				description: 'NorthEast Text Position',
-			},
-			{
-				name: 'NorthWest',
-				value: 'NorthWest',
-				description: 'NorthWest Text Position',
-			},
-			{
-				name: 'South',
-				value: 'South',
-				description: 'South Text Position',
-			},
-			{
-				name: 'SouthEast',
-				value: 'SouthEast',
-				description: 'SouthEast Text Position',
-			},
-			{
-				name: 'SouthWest',
-				value: 'SouthWest',
-				description: 'SouthWest Text Position',
-			},
-			{
-				name: 'West',
-				value: 'West',
-				description: 'West Text Position',
-			},
-		],
-	},
-	{
-		displayName: 'Max Line Length',
+		displayName: 'Max Line Length (chars)',
 		name: 'lineLength',
 		type: 'number',
-		typeOptions: {
-			minValue: 1,
-		},
-		default: 80,
-		displayOptions: {
-			show: {
-				operation: ['text'],
-			},
-		},
-		description: 'Max amount of characters in a line before a line-break should get added',
+		typeOptions: { minValue: 1 },
+		default: 40,
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Maximum characters per line before wrapping',
+	},
+	{
+		displayName: 'Text Shadow',
+		name: 'textShadow',
+		type: 'boolean',
+		default: false,
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Whether to add a drop shadow behind the text',
 	},
 
-	// ----------------------------------
-	//         blur
-	// ----------------------------------
-	{
-		displayName: 'Blur',
-		name: 'blur',
-		type: 'number',
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1000,
-		},
-		default: 5,
-		displayOptions: {
-			show: {
-				operation: ['blur'],
-			},
-		},
-		description: 'How strong the blur should be',
-	},
+	// ────────────────────────────────────────────────────────────────────────
+	// blur
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Sigma',
 		name: 'sigma',
 		type: 'number',
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1000,
-		},
-		default: 2,
-		displayOptions: {
-			show: {
-				operation: ['blur'],
-			},
-		},
-		description: 'The sigma of the blur',
+		typeOptions: { minValue: 0.3, maxValue: 1000, numberPrecision: 1 },
+		default: 3,
+		displayOptions: { show: { operation: ['blur'] } },
+		description: 'Blur radius (sigma). Higher = more blur.',
 	},
 
-	// ----------------------------------
-	//         border
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// border
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Border Width',
 		name: 'borderWidth',
 		type: 'number',
-		default: 10,
-		displayOptions: {
-			show: {
-				operation: ['border'],
-			},
-		},
-		description: 'The width of the border',
+		default: 20,
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { operation: ['border'] } },
+		description: 'Left and right border width in pixels',
 	},
 	{
 		displayName: 'Border Height',
 		name: 'borderHeight',
 		type: 'number',
-		default: 10,
-		displayOptions: {
-			show: {
-				operation: ['border'],
-			},
-		},
-		description: 'The height of the border',
+		default: 20,
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { operation: ['border'] } },
+		description: 'Top and bottom border height in pixels',
 	},
 	{
 		displayName: 'Border Color',
 		name: 'borderColor',
 		type: 'color',
 		default: '#000000',
-		displayOptions: {
-			show: {
-				operation: ['border'],
-			},
-		},
-		description: 'Color of the border',
+		displayOptions: { show: { operation: ['border'] } },
+		description: 'Colour of the border',
 	},
 
-	// ----------------------------------
-	//         composite
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// composite
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Composite Image Property',
 		name: 'dataPropertyNameComposite',
 		type: 'string',
-		default: '',
+		default: 'data2',
 		placeholder: 'data2',
-		displayOptions: {
-			show: {
-				operation: ['composite'],
-			},
-		},
-		description:
-			'The name of the binary property which contains the data of the image to composite on top of image which is found in Property Name',
+		displayOptions: { show: { operation: ['composite'] } },
+		description: 'Binary property name that contains the image to overlay',
 	},
 	{
-		displayName: 'Operator',
+		displayName: 'Blend Mode',
 		name: 'operator',
 		type: 'options',
-		displayOptions: {
-			show: {
-				operation: ['composite'],
-			},
-		},
+		displayOptions: { show: { operation: ['composite'] } },
 		options: [
-			{
-				name: 'Add',
-				value: 'Add',
-			},
-			{
-				name: 'Atop',
-				value: 'Atop',
-			},
-			{
-				name: 'Bumpmap',
-				value: 'Bumpmap',
-			},
-			{
-				name: 'Copy',
-				value: 'Copy',
-			},
-			{
-				name: 'Copy Black',
-				value: 'CopyBlack',
-			},
-			{
-				name: 'Copy Blue',
-				value: 'CopyBlue',
-			},
-			{
-				name: 'Copy Cyan',
-				value: 'CopyCyan',
-			},
-			{
-				name: 'Copy Green',
-				value: 'CopyGreen',
-			},
-			{
-				name: 'Copy Magenta',
-				value: 'CopyMagenta',
-			},
-			{
-				name: 'Copy Opacity',
-				value: 'CopyOpacity',
-			},
-			{
-				name: 'Copy Red',
-				value: 'CopyRed',
-			},
-			{
-				name: 'Copy Yellow',
-				value: 'CopyYellow',
-			},
-			{
-				name: 'Difference',
-				value: 'Difference',
-			},
-			{
-				name: 'Divide',
-				value: 'Divide',
-			},
-			{
-				name: 'In',
-				value: 'In',
-			},
-			{
-				name: 'Minus',
-				value: 'Minus',
-			},
-			{
-				name: 'Multiply',
-				value: 'Multiply',
-			},
-			{
-				name: 'Out',
-				value: 'Out',
-			},
-			{
-				name: 'Over',
-				value: 'Over',
-			},
-			{
-				name: 'Plus',
-				value: 'Plus',
-			},
-			{
-				name: 'Subtract',
-				value: 'Subtract',
-			},
-			{
-				name: 'Xor',
-				value: 'Xor',
-			},
+			{ name: 'Clear', value: 'clear' },
+			{ name: 'Source', value: 'source' },
+			{ name: 'Over (Normal)', value: 'over' },
+			{ name: 'In', value: 'in' },
+			{ name: 'Out', value: 'out' },
+			{ name: 'Atop', value: 'atop' },
+			{ name: 'Destination Over', value: 'dest-over' },
+			{ name: 'Destination In', value: 'dest-in' },
+			{ name: 'Destination Out', value: 'dest-out' },
+			{ name: 'Destination Atop', value: 'dest-atop' },
+			{ name: 'Xor', value: 'xor' },
+			{ name: 'Add', value: 'add' },
+			{ name: 'Saturate', value: 'saturate' },
+			{ name: 'Multiply', value: 'multiply' },
+			{ name: 'Screen', value: 'screen' },
+			{ name: 'Overlay', value: 'overlay' },
+			{ name: 'Darken', value: 'darken' },
+			{ name: 'Lighten', value: 'lighten' },
+			{ name: 'Colour Dodge', value: 'colour-dodge' },
+			{ name: 'Colour Burn', value: 'colour-burn' },
+			{ name: 'Hard Light', value: 'hard-light' },
+			{ name: 'Soft Light', value: 'soft-light' },
+			{ name: 'Difference', value: 'difference' },
+			{ name: 'Exclusion', value: 'exclusion' },
 		],
-		default: 'Over',
-		description: 'The operator to use to combine the images',
+		default: 'over',
+		description: 'Blending mode for compositing',
 	},
 	{
 		displayName: 'Position X',
 		name: 'positionX',
 		type: 'number',
 		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['composite'],
-			},
-		},
-		description: 'X (horizontal) position of composite image',
+		displayOptions: { show: { operation: ['composite'] } },
+		description: 'X offset of the overlay image (pixels from left)',
 	},
 	{
 		displayName: 'Position Y',
 		name: 'positionY',
 		type: 'number',
 		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['composite'],
-			},
-		},
-		description: 'Y (vertical) position of composite image',
+		displayOptions: { show: { operation: ['composite'] } },
+		description: 'Y offset of the overlay image (pixels from top)',
 	},
 
-	// ----------------------------------
-	//         crop
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// crop
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Width',
 		name: 'width',
 		type: 'number',
 		default: 500,
-		displayOptions: {
-			show: {
-				operation: ['crop'],
-			},
-		},
-		description: 'Crop width',
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['crop'] } },
+		description: 'Width of the crop region',
 	},
 	{
 		displayName: 'Height',
 		name: 'height',
 		type: 'number',
 		default: 500,
-		displayOptions: {
-			show: {
-				operation: ['crop'],
-			},
-		},
-		description: 'Crop height',
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['crop'] } },
+		description: 'Height of the crop region',
 	},
 	{
 		displayName: 'Position X',
 		name: 'positionX',
 		type: 'number',
 		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['crop'],
-			},
-		},
-		description: 'X (horizontal) position to crop from',
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { operation: ['crop'] } },
+		description: 'X coordinate (from left) of the crop start',
 	},
 	{
 		displayName: 'Position Y',
 		name: 'positionY',
 		type: 'number',
 		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['crop'],
-			},
-		},
-		description: 'Y (vertical) position to crop from',
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { operation: ['crop'] } },
+		description: 'Y coordinate (from top) of the crop start',
 	},
 
-	// ----------------------------------
-	//         resize
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// resize
+	// ────────────────────────────────────────────────────────────────────────
 	{
 		displayName: 'Width',
 		name: 'width',
 		type: 'number',
-		default: 500,
-		displayOptions: {
-			show: {
-				operation: ['resize'],
-			},
-		},
-		description: 'New width of the image',
+		default: 1080,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['resize'] } },
+		description: 'Target width in pixels',
 	},
 	{
 		displayName: 'Height',
 		name: 'height',
 		type: 'number',
-		default: 500,
-		displayOptions: {
-			show: {
-				operation: ['resize'],
-			},
-		},
-		description: 'New height of the image',
+		default: 1080,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { operation: ['resize'] } },
+		description: 'Target height in pixels',
 	},
 	{
-		displayName: 'Option',
+		displayName: 'Fit',
 		name: 'resizeOption',
 		type: 'options',
 		options: [
-			{
-				name: 'Ignore Aspect Ratio',
-				value: 'ignoreAspectRatio',
-				description: 'Ignore aspect ratio and resize exactly to specified values',
-			},
-			{
-				name: 'Maximum Area',
-				value: 'maximumArea',
-				description: 'Specified values are maximum area',
-			},
-			{
-				name: 'Minimum Area',
-				value: 'minimumArea',
-				description: 'Specified values are minimum area',
-			},
-			{
-				name: 'Only if Larger',
-				value: 'onlyIfLarger',
-				description: 'Resize only if image is larger than width or height',
-			},
-			{
-				name: 'Only if Smaller',
-				value: 'onlyIfSmaller',
-				description: 'Resize only if image is smaller than width or height',
-			},
-			{
-				name: 'Percent',
-				value: 'percent',
-				description: 'Width and height are specified in percents',
-			},
+			{ name: 'Cover (Crop to Fill)', value: 'cover', description: 'Scales to fill, crops excess' },
+			{ name: 'Contain (Letterbox)', value: 'contain', description: 'Scales to fit, adds padding' },
+			{ name: 'Fill (Ignore Aspect Ratio)', value: 'fill', description: 'Stretches to exact dimensions' },
+			{ name: 'Inside (Max Area)', value: 'inside', description: 'Scales down only if larger than dimensions' },
+			{ name: 'Outside (Min Area)', value: 'outside', description: 'Scales up only if smaller than dimensions' },
 		],
-		default: 'maximumArea',
-		displayOptions: {
-			show: {
-				operation: ['resize'],
-			},
-		},
-		description: 'How to resize the image',
+		default: 'cover',
+		displayOptions: { show: { operation: ['resize'] } },
+		description: 'How to fit the image into the target dimensions',
+	},
+	{
+		displayName: 'Background Color (for Contain)',
+		name: 'resizeBackground',
+		type: 'color',
+		default: '#000000',
+		typeOptions: { showAlpha: true },
+		displayOptions: { show: { operation: ['resize'], resizeOption: ['contain'] } },
+		description: 'Background fill colour when using "Contain" fit',
 	},
 
-	// ----------------------------------
-	//         rotate
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// rotate
+	// ────────────────────────────────────────────────────────────────────────
 	{
-		displayName: 'Rotate',
+		displayName: 'Degrees',
 		name: 'rotate',
 		type: 'number',
-		typeOptions: {
-			minValue: -360,
-			maxValue: 360,
-		},
-		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['rotate'],
-			},
-		},
-		description: 'How much the image should be rotated',
+		typeOptions: { minValue: -360, maxValue: 360 },
+		default: 90,
+		displayOptions: { show: { operation: ['rotate'] } },
+		description: 'Angle to rotate (positive = clockwise)',
 	},
 	{
 		displayName: 'Background Color',
 		name: 'backgroundColor',
 		type: 'color',
-		default: '#ffffffff',
-		typeOptions: {
-			showAlpha: true,
-		},
-		displayOptions: {
-			show: {
-				operation: ['rotate'],
-			},
-		},
-		description:
-			'The color to use for the background when image gets rotated by anything which is not a multiple of 90',
+		default: '#00000000',
+		typeOptions: { showAlpha: true },
+		displayOptions: { show: { operation: ['rotate'] } },
+		description: 'Fill colour for the area revealed by rotation',
 	},
 
-	// ----------------------------------
-	//         shear
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// shear
+	// ────────────────────────────────────────────────────────────────────────
 	{
-		displayName: 'Degrees X',
+		displayName: 'Shear X (degrees)',
 		name: 'degreesX',
 		type: 'number',
+		typeOptions: { numberPrecision: 1 },
 		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['shear'],
-			},
-		},
-		description: 'X (horizontal) shear degrees',
+		displayOptions: { show: { operation: ['shear'] } },
+		description: 'Horizontal shear angle in degrees',
 	},
 	{
-		displayName: 'Degrees Y',
+		displayName: 'Shear Y (degrees)',
 		name: 'degreesY',
 		type: 'number',
-		default: 0,
-		displayOptions: {
-			show: {
-				operation: ['shear'],
-			},
-		},
-		description: 'Y (vertical) shear degrees',
+		typeOptions: { numberPrecision: 1 },
+		default: 10,
+		displayOptions: { show: { operation: ['shear'] } },
+		description: 'Vertical shear angle in degrees',
 	},
 
-	// ----------------------------------
-	//         transparent
-	// ----------------------------------
+	// ────────────────────────────────────────────────────────────────────────
+	// transparent (PNG output, trims near-white/black to alpha)
+	// ────────────────────────────────────────────────────────────────────────
 	{
-		displayName: 'Color',
-		name: 'color',
+		displayName: 'Background Color to Remove',
+		name: 'transparentColor',
 		type: 'color',
-		default: '#ff0000',
-		displayOptions: {
-			show: {
-				operation: ['transparent'],
-			},
-		},
-		description: 'The color to make transparent',
+		default: '#ffffff',
+		displayOptions: { show: { operation: ['transparent'] } },
+		description: 'The background colour to replace with transparency',
+	},
+	{
+		displayName: 'Tolerance',
+		name: 'tolerance',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 255 },
+		default: 30,
+		displayOptions: { show: { operation: ['transparent'] } },
+		description: 'Colour matching tolerance (0 = exact match only, 255 = match everything)',
+	},
+
+	// ────────────────────────────────────────────────────────────────────────
+	// sharpen
+	// ────────────────────────────────────────────────────────────────────────
+	{
+		displayName: 'Sigma',
+		name: 'sharpenSigma',
+		type: 'number',
+		typeOptions: { minValue: 0.5, maxValue: 5, numberPrecision: 1 },
+		default: 1,
+		displayOptions: { show: { operation: ['sharpen'] } },
+		description: 'Unsharp mask sigma. Higher = wider radius.',
+	},
+	{
+		displayName: 'Flat Area Threshold',
+		name: 'sharpenFlat',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 10000, numberPrecision: 1 },
+		default: 1,
+		displayOptions: { show: { operation: ['sharpen'] } },
+		description: 'Threshold of flat areas (lower = sharpen more of the image)',
+	},
+	{
+		displayName: 'Jagged Area Threshold',
+		name: 'sharpenJagged',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 10000, numberPrecision: 1 },
+		default: 2,
+		displayOptions: { show: { operation: ['sharpen'] } },
+		description: 'Threshold of jagged edges (higher = sharpen edges more aggressively)',
+	},
+
+	// ────────────────────────────────────────────────────────────────────────
+	// gamma
+	// ────────────────────────────────────────────────────────────────────────
+	{
+		displayName: 'Gamma Value',
+		name: 'gammaValue',
+		type: 'number',
+		typeOptions: { minValue: 1, maxValue: 3, numberPrecision: 1 },
+		default: 2.2,
+		displayOptions: { show: { operation: ['gamma'] } },
+		description: 'Gamma value between 1.0 (darker) and 3.0 (brighter)',
+	},
+
+	// ────────────────────────────────────────────────────────────────────────
+	// tint
+	// ────────────────────────────────────────────────────────────────────────
+	{
+		displayName: 'Tint Color',
+		name: 'tintColor',
+		type: 'color',
+		default: '#ff6b35',
+		displayOptions: { show: { operation: ['tint'] } },
+		description: 'Colour to tint the image with',
+	},
+
+	// ────────────────────────────────────────────────────────────────────────
+	// watermark
+	// ────────────────────────────────────────────────────────────────────────
+	{
+		displayName: 'Watermark Image Property',
+		name: 'watermarkProperty',
+		type: 'string',
+		default: 'watermark',
+		placeholder: 'watermark',
+		displayOptions: { show: { operation: ['watermark'] } },
+		description: 'Binary property name containing the watermark image',
+	},
+	{
+		displayName: 'Gravity (Position)',
+		name: 'watermarkGravity',
+		type: 'options',
+		displayOptions: { show: { operation: ['watermark'] } },
+		options: [
+			{ name: 'Center', value: 'centre' },
+			{ name: 'Top Left', value: 'northwest' },
+			{ name: 'Top Center', value: 'north' },
+			{ name: 'Top Right', value: 'northeast' },
+			{ name: 'Middle Left', value: 'west' },
+			{ name: 'Middle Right', value: 'east' },
+			{ name: 'Bottom Left', value: 'southwest' },
+			{ name: 'Bottom Center', value: 'south' },
+			{ name: 'Bottom Right', value: 'southeast' },
+		],
+		default: 'southeast',
+		description: 'Where to place the watermark',
+	},
+	{
+		displayName: 'Opacity (%)',
+		name: 'watermarkOpacity',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 100 },
+		default: 50,
+		displayOptions: { show: { operation: ['watermark'] } },
+		description: 'Watermark opacity from 0 (invisible) to 100 (fully opaque)',
+	},
+	{
+		displayName: 'Max Size (% of Canvas)',
+		name: 'watermarkScale',
+		type: 'number',
+		typeOptions: { minValue: 1, maxValue: 100 },
+		default: 20,
+		displayOptions: { show: { operation: ['watermark'] } },
+		description: 'Scale the watermark so its longest side is this % of the canvas',
 	},
 ];
+
+// ---------------------------------------------------------------------------
+// Node class
+// ---------------------------------------------------------------------------
 
 export class EditImagePlus implements INodeType {
 	description: INodeTypeDescription = {
@@ -843,15 +806,18 @@ export class EditImagePlus implements INodeType {
 		name: 'editImagePlus',
 		icon: 'fa:image',
 		group: ['transform'],
-		version: 1,
-		description: 'Edits an image like blur, resize or adding border and text',
+		version: 2,
+		description: 'Advanced image editing: blur, crop, resize, text, templates, effects and more — powered by Sharp',
 		defaults: {
 			name: 'Edit Image+',
 			color: '#553399',
 		},
-		inputs: ['main'],
-		outputs: ['main'],
+		inputs: [NodeConnectionType.Main],
+		outputs: [NodeConnectionType.Main],
 		properties: [
+			// ────────────────────────────────────────────────────────────────
+			// Top-level operation selector
+			// ────────────────────────────────────────────────────────────────
 			{
 				displayName: 'Operation',
 				name: 'operation',
@@ -861,51 +827,52 @@ export class EditImagePlus implements INodeType {
 					{
 						name: 'Get Information',
 						value: 'information',
-						description: 'Returns image information like resolution',
+						description: 'Return image metadata (size, format, DPI, …)',
+						action: 'Get image information',
 					},
 					{
 						name: 'Multi Step',
 						value: 'multiStep',
-						description: 'Perform multiple operations',
+						description: 'Chain multiple operations in one node',
+						action: 'Apply multiple operations',
 					},
 					...nodeOperations,
-				].sort((a, b) => {
-					if (a.name.toLowerCase() < b.name.toLowerCase()) {
-						return -1;
-					}
-					if (a.name.toLowerCase() > b.name.toLowerCase()) {
-						return 1;
-					}
-					return 0;
-				}),
-				default: '',
+				].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
+				default: 'resize',
 			},
+			// Input binary property
 			{
-				displayName: 'Property Name',
+				displayName: 'Input Property Name',
 				name: 'dataPropertyName',
 				type: 'string',
 				default: 'data',
-				description: 'Name of the binary property in which the image data can be found',
+				displayOptions: {
+					hide: { operation: ['information', 'create', 'template'] },
+				},
+				description: 'Name of the binary property that contains the input image',
+			},
+			{
+				displayName: 'Input Property Name',
+				name: 'dataPropertyName',
+				type: 'string',
+				default: 'data',
+				displayOptions: {
+					show: { operation: ['information'] },
+				},
+				description: 'Name of the binary property that contains the input image',
 			},
 
-			// ----------------------------------
-			//         multiStep
-			// ----------------------------------
+			// ────────────────────────────────────────────────────────────────
+			// multiStep fixed-collection
+			// ────────────────────────────────────────────────────────────────
 			{
 				displayName: 'Operations',
 				name: 'operations',
 				placeholder: 'Add Operation',
 				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-					sortable: true,
-				},
-				displayOptions: {
-					show: {
-						operation: ['multiStep'],
-					},
-				},
-				description: 'The operations to perform',
+				typeOptions: { multipleValues: true, sortable: true },
+				displayOptions: { show: { operation: ['multiStep'] } },
+				description: 'Operations to apply in sequence',
 				default: {},
 				options: [
 					{
@@ -918,494 +885,620 @@ export class EditImagePlus implements INodeType {
 								type: 'options',
 								noDataExpression: true,
 								options: nodeOperations,
-								default: '',
+								default: 'resize',
 							},
 							...nodeOperationOptions,
-							{
-								displayName: 'Font Name or ID',
-								name: 'font',
-								type: 'options',
-								displayOptions: {
-									show: {
-										operation: ['text'],
-									},
-								},
-								typeOptions: {
-									loadOptionsMethod: 'getFonts',
-								},
-								default: '',
-								description:
-									'The font to use. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code-examples/expressions/">expression</a>.',
-							},
 						],
 					},
 				],
 			},
 
+			// Spread single-step operation params
 			...nodeOperationOptions,
+
+			// ────────────────────────────────────────────────────────────────
+			// Output options
+			// ────────────────────────────────────────────────────────────────
 			{
 				displayName: 'Options',
 				name: 'options',
 				type: 'collection',
-				placeholder: 'Add Option',
+				placeholder: 'Add Output Option',
 				default: {},
-				displayOptions: {
-					hide: {
-						operation: ['information'],
-					},
-				},
+				displayOptions: { hide: { operation: ['information'] } },
 				options: [
 					{
-						displayName: 'File Name',
-						name: 'fileName',
+						displayName: 'Output Property Name',
+						name: 'outputPropertyName',
 						type: 'string',
 						default: '',
-						description: 'File name to set in binary data',
-					},
-					{
-						displayName: 'Font Name or ID',
-						name: 'font',
-						type: 'options',
-						displayOptions: {
-							show: {
-								'/operation': ['text'],
-							},
-						},
-						typeOptions: {
-							loadOptionsMethod: 'getFonts',
-						},
-						default: '',
-						description:
-							'The font to use. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code-examples/expressions/">expression</a>.',
+						placeholder: 'Leave blank to overwrite input property',
+						description: 'Binary property name for the output image',
 					},
 					{
 						displayName: 'Format',
 						name: 'format',
 						type: 'options',
 						options: [
-							{
-								name: 'bmp',
-								value: 'bmp',
-							},
-							{
-								name: 'gif',
-								value: 'gif',
-							},
-							{
-								name: 'jpeg',
-								value: 'jpeg',
-							},
-							{
-								name: 'png',
-								value: 'png',
-							},
-							{
-								name: 'tiff',
-								value: 'tiff',
-							},
-							{
-								name: 'WebP',
-								value: 'webp',
-							},
+							{ name: 'AVIF', value: 'avif' },
+							{ name: 'GIF', value: 'gif' },
+							{ name: 'JPEG', value: 'jpeg' },
+							{ name: 'PNG', value: 'png' },
+							{ name: 'TIFF', value: 'tiff' },
+							{ name: 'WebP', value: 'webp' },
 						],
-						default: 'jpeg',
-						description: 'Set the output image format',
+						default: 'png',
+						description: 'Output image format',
 					},
 					{
-						displayName: 'Quality',
+						displayName: 'Quality (JPEG / WebP / AVIF)',
 						name: 'quality',
 						type: 'number',
-						typeOptions: {
-							minValue: 0,
-							maxValue: 100,
-						},
-						default: 100,
-						displayOptions: {
-							show: {
-								format: ['jpeg', 'png', 'tiff'],
-							},
-						},
-						description: 'Sets the jpeg|png|tiff compression level from 0 to 100 (best)',
+						typeOptions: { minValue: 1, maxValue: 100 },
+						default: 90,
+						displayOptions: { show: { format: ['jpeg', 'webp', 'avif'] } },
+						description: 'Output quality 1–100 (higher = better quality, larger file)',
+					},
+					{
+						displayName: 'PNG Compression Level',
+						name: 'pngCompressionLevel',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 9 },
+						default: 6,
+						displayOptions: { show: { format: ['png'] } },
+						description: 'PNG compression level 0 (fastest) to 9 (smallest)',
+					},
+					{
+						displayName: 'File Name',
+						name: 'fileName',
+						type: 'string',
+						default: '',
+						description: 'Override the file name stored in binary data',
 					},
 				],
 			},
 		],
 	};
 
-	methods = {
-		loadOptions: {
-			async getFonts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				// @ts-ignore
-				const files = await getSystemFonts();
-				const returnData: INodePropertyOptions[] = [];
-
-				files.forEach((entry: string) => {
-					const pathParts = pathParse(entry);
-					if (!pathParts.ext) {
-						return;
-					}
-
-					returnData.push({
-						name: pathParts.name,
-						value: entry,
-					});
-				});
-
-				returnData.sort((a, b) => {
-					if (a.name < b.name) {
-						return -1;
-					}
-					if (a.name > b.name) {
-						return 1;
-					}
-					return 0;
-				});
-
-				returnData.unshift({
-					name: 'default',
-					value: 'default',
-				});
-
-				return returnData;
-			},
-		},
-	};
-
+	// -------------------------------------------------------------------------
+	// execute
+	// -------------------------------------------------------------------------
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
-
 		const returnData: INodeExecutionData[] = [];
-		const length = items.length;
-		let item: INodeExecutionData;
 
-		for (let itemIndex = 0; itemIndex < length; itemIndex++) {
+		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
-				item = items[itemIndex];
+				const item = items[itemIndex];
+				const operation = this.getNodeParameter('operation', itemIndex) as string;
+				const dataPropertyName = this.getNodeParameter('dataPropertyName', itemIndex, 'data') as string;
+				const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
 
-				const operation = this.getNodeParameter('operation', itemIndex);
-				const dataPropertyName = this.getNodeParameter('dataPropertyName', itemIndex);
-
-				const options = this.getNodeParameter('options', itemIndex, {});
-
-				const cleanupFunctions: Array<() => void> = [];
-
-				let gmInstance: gm.State;
-
-				const requiredOperationParameters: {
-					[key: string]: string[];
-				} = {
-					blur: ['blur', 'sigma'],
-					border: ['borderColor', 'borderWidth', 'borderHeight'],
-					create: ['backgroundColor', 'height', 'width'],
-					crop: ['height', 'positionX', 'positionY', 'width'],
-					composite: ['dataPropertyNameComposite', 'operator', 'positionX', 'positionY'],
-					draw: [
-						'color',
-						'cornerRadius',
-						'endPositionX',
-						'endPositionY',
-						'primitive',
-						'startPositionX',
-						'startPositionY',
-					],
-					information: [],
-					resize: ['height', 'resizeOption', 'width'],
-					rotate: ['backgroundColor', 'rotate'],
-					shear: ['degreesX', 'degreesY'],
-					text: ['font', 'fontColor', 'fontSize', 'lineLength', 'positionX', 'positionY', 'text', 'width', 'height', 'gravity'],
-					transparent: ['color'],
-				};
-
+				// Determine which operations list to process
 				let operations: IDataObject[] = [];
 				if (operation === 'multiStep') {
-					// Operation parameters are already in the correct format
-					const operationsData = this.getNodeParameter('operations', itemIndex, {
-						operations: [],
-					}) as IDataObject;
-					operations = operationsData.operations as IDataObject[];
+					const operationsData = this.getNodeParameter('operations', itemIndex, { operations: [] }) as IDataObject;
+					operations = (operationsData.operations as IDataObject[]) ?? [];
 				} else {
-					// Operation parameters have to first get collected
-					const operationParameters: IDataObject = {};
-					requiredOperationParameters[operation].forEach((parameterName) => {
-						try {
-							operationParameters[parameterName] = this.getNodeParameter(parameterName, itemIndex);
-						} catch (error) {}
-					});
-
-					operations = [
-						{
-							operation,
-							...operationParameters,
-						},
-					];
+					// Collect all parameters for single operation
+					const singleOp = buildSingleOpParams(this, operation, itemIndex);
+					operations = [{ operation, ...singleOp }];
 				}
 
-				if (operations[0].operation !== 'create') {
-					// "create" generates a new image so does not require any incoming data.
-					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
-					const binaryDataBuffer = await this.helpers.getBinaryDataBuffer(
-						itemIndex,
-						dataPropertyName,
-					);
-					gmInstance = gm(binaryDataBuffer);
-					gmInstance = gmInstance.background('transparent');
-				}
-
-				const newItem: INodeExecutionData = {
-					json: item.json,
-					binary: {},
-					pairedItem: {
-						item: itemIndex,
-					},
-				};
-
+				// ── Get information ─────────────────────────────────────────
 				if (operation === 'information') {
-					// Just return the information
-					const imageData = await new Promise<IDataObject>((resolve, reject) => {
-						gmInstance = gmInstance.identify((error, data) => {
-							if (error) {
-								reject(error);
-								return;
-							}
-							resolve(data as unknown as IDataObject);
-						});
-					});
-
-					newItem.json = imageData;
-				}
-
-				for (let i = 0; i < operations.length; i++) {
-					const operationData = operations[i];
-					if (operationData.operation === 'blur') {
-						gmInstance = gmInstance!.blur(
-							operationData.blur as number,
-							operationData.sigma as number,
-						);
-					} else if (operationData.operation === 'border') {
-						gmInstance = gmInstance!
-							.borderColor(operationData.borderColor as string)
-							.border(operationData.borderWidth as number, operationData.borderHeight as number);
-					} else if (operationData.operation === 'composite') {
-						const positionX = operationData.positionX as number;
-						const positionY = operationData.positionY as number;
-						const operator = operationData.operator as string;
-
-						const geometryString =
-							(positionX >= 0 ? '+' : '') + positionX + (positionY >= 0 ? '+' : '') + positionY;
-
-						const binaryPropertyName = operationData.dataPropertyNameComposite as string;
-						this.helpers.assertBinaryData(itemIndex, binaryPropertyName);
-						const binaryDataBuffer = await this.helpers.getBinaryDataBuffer(
-							itemIndex,
-							binaryPropertyName,
-						);
-
-						const { fd, path, cleanup } = await file();
-						cleanupFunctions.push(cleanup);
-						await fsWriteFileAsync(fd, binaryDataBuffer);
-
-						if (operations[0].operation === 'create') {
-							// It seems like if the image gets created newly we have to create a new gm instance
-							// else it fails for some reason
-							gmInstance = gm(gmInstance!.stream('png'))
-								.compose(operator)
-								.geometry(geometryString)
-								.composite(path);
-						} else {
-							gmInstance = gmInstance!.compose(operator).geometry(geometryString).composite(path);
-						}
-
-						if (operations.length !== i + 1) {
-							// If there are other operations after the current one create a new gm instance
-							// because else things do get messed up
-							gmInstance = gm(gmInstance.stream());
-						}
-					} else if (operationData.operation === 'create') {
-						gmInstance = gm(
-							operationData.width as number,
-							operationData.height as number,
-							operationData.backgroundColor as string,
-						);
-						if (!options.format) {
-							options.format = 'png';
-						}
-					} else if (operationData.operation === 'crop') {
-						gmInstance = gmInstance!.crop(
-							operationData.width as number,
-							operationData.height as number,
-							operationData.positionX as number,
-							operationData.positionY as number,
-						);
-					} else if (operationData.operation === 'draw') {
-						gmInstance = gmInstance!.fill(operationData.color as string);
-
-						if (operationData.primitive === 'line') {
-							gmInstance = gmInstance.drawLine(
-								operationData.startPositionX as number,
-								operationData.startPositionY as number,
-								operationData.endPositionX as number,
-								operationData.endPositionY as number,
-							);
-						} else if (operationData.primitive === 'circle') {
-							gmInstance = gmInstance.drawCircle(
-								operationData.startPositionX as number,
-								operationData.startPositionY as number,
-								operationData.endPositionX as number,
-								operationData.endPositionY as number,
-							);
-						} else if (operationData.primitive === 'rectangle') {
-							gmInstance = gmInstance.drawRectangle(
-								operationData.startPositionX as number,
-								operationData.startPositionY as number,
-								operationData.endPositionX as number,
-								operationData.endPositionY as number,
-								(operationData.cornerRadius as number) || undefined,
-							);
-						}
-					} else if (operationData.operation === 'resize') {
-						const resizeOption = operationData.resizeOption as string;
-
-						// By default use "maximumArea"
-						let option: gm.ResizeOption = '@';
-						if (resizeOption === 'ignoreAspectRatio') {
-							option = '!';
-						} else if (resizeOption === 'minimumArea') {
-							option = '^';
-						} else if (resizeOption === 'onlyIfSmaller') {
-							option = '<';
-						} else if (resizeOption === 'onlyIfLarger') {
-							option = '>';
-						} else if (resizeOption === 'percent') {
-							option = '%';
-						}
-
-						gmInstance = gmInstance!.resize(
-							operationData.width as number,
-							operationData.height as number,
-							option,
-						);
-					} else if (operationData.operation === 'rotate') {
-						gmInstance = gmInstance!.rotate(
-							operationData.backgroundColor as string,
-							operationData.rotate as number,
-						);
-					} else if (operationData.operation === 'shear') {
-						gmInstance = gmInstance!.shear(
-							operationData.degreesX as number,
-							operationData.degreesY as number,
-						);
-					} else if (operationData.operation === 'text') {
-						// Split the text in multiple lines
-						const lines: string[] = [];
-						let currentLine = '';
-						(operationData.text as string).split('\n').forEach((textLine: string) => {
-							textLine.split(' ').forEach((textPart: string) => {
-								if (
-									currentLine.length + textPart.length + 1 >
-									(operationData.lineLength as number)
-								) {
-									lines.push(currentLine.trim());
-									currentLine = `${textPart} `;
-									return;
-								}
-								currentLine += `${textPart} `;
-							});
-
-							lines.push(currentLine.trim());
-							currentLine = '';
-						});
-
-						// Combine the lines to a single string
-						const renderText = lines.join('\n');
-
-						const font = options.font || operationData.font;
-
-						if (font && font !== 'default') {
-							gmInstance = gmInstance!.font(font as string);
-						}
-
-						gmInstance = gmInstance!
-							.fill(operationData.fontColor as string)
-							.fontSize(operationData.fontSize as number)
-							.region(operationData.width as number, operationData.height as number)
-							.gravity(operationData.gravity as string)
-							.drawText(operationData.positionX as number, operationData.positionY as number, renderText, operationData.gravity as string);
-					} else if (operationData.operation === 'transparent') {
-						gmInstance = gmInstance!.transparent(operationData.color as string);
-					}
-				}
-
-				if (item.binary !== undefined && newItem.binary) {
-					// Create a shallow copy of the binary data so that the old
-					// data references which do not get changed still stay behind
-					// but the incoming data does not get changed.
-					Object.assign(newItem.binary, item.binary);
-					// Make a deep copy of the binary data we change
-					if (newItem.binary[dataPropertyName]) {
-						newItem.binary[dataPropertyName] = deepCopy(newItem.binary[dataPropertyName]);
-					}
-				}
-
-				if (newItem.binary![dataPropertyName] === undefined) {
-					newItem.binary![dataPropertyName] = {
-						data: '',
-						mimeType: '',
-					};
-				}
-
-				if (options.quality !== undefined) {
-					gmInstance = gmInstance!.quality(options.quality as number);
-				}
-
-				if (options.format !== undefined) {
-					gmInstance = gmInstance!.setFormat(options.format as string);
-					newItem.binary![dataPropertyName].fileExtension = options.format as string;
-					newItem.binary![dataPropertyName].mimeType = `image/${options.format}`;
-					const fileName = newItem.binary![dataPropertyName].fileName;
-					if (fileName?.includes('.')) {
-						newItem.binary![dataPropertyName].fileName =
-							fileName.split('.').slice(0, -1).join('.') + '.' + options.format;
-					}
-				}
-
-				if (options.fileName !== undefined) {
-					newItem.binary![dataPropertyName].fileName = options.fileName as string;
-				}
-
-				returnData.push(
-					await new Promise<INodeExecutionData>((resolve, reject) => {
-						gmInstance.toBuffer(async (error: Error | null, buffer: Buffer) => {
-							cleanupFunctions.forEach(async (cleanup) => cleanup());
-
-							if (error) {
-								return reject(error);
-							}
-
-							const binaryData = await this.helpers.prepareBinaryData(Buffer.from(buffer));
-							newItem.binary![dataPropertyName] = {
-								...newItem.binary![dataPropertyName],
-								...binaryData,
-							};
-
-							return resolve(newItem);
-						});
-					}),
-				);
-			} catch (error) {
-				if (this.continueOnFail()) {
+					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
+					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, dataPropertyName);
+					const meta = await sharp(buf).metadata();
 					returnData.push({
-						json: {
-							error: error.message,
-						},
-						pairedItem: {
-							item: itemIndex,
-						},
+						json: meta as unknown as IDataObject,
+						pairedItem: { item: itemIndex },
 					});
 					continue;
 				}
-				throw error;
+
+				// ── Determine output property name ──────────────────────────
+				const outputPropertyName = ((options.outputPropertyName as string) || '') || dataPropertyName;
+
+				// ── Build sharp pipeline ─────────────────────────────────────
+				let sharpInstance: sharp.Sharp;
+
+				if (operations[0]?.operation === 'create') {
+					const op = operations[0];
+					const bg = hexToRgba(op.backgroundColor as string ?? '#ffffff');
+					sharpInstance = sharp({
+						create: {
+							width: op.width as number,
+							height: op.height as number,
+							channels: 4,
+							background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
+						},
+					});
+				} else if (operations[0]?.operation === 'template') {
+					sharpInstance = await buildTemplateInstance(operations[0]);
+				} else {
+					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
+					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, dataPropertyName);
+					sharpInstance = sharp(buf);
+				}
+
+				// Apply each operation
+				for (const op of operations) {
+					sharpInstance = await applyOperation(this, sharpInstance, op, itemIndex);
+				}
+
+				// ── Output format ───────────────────────────────────────────
+				const fmt = (options.format as string) || 'png';
+				const mimeType = `image/${fmt}`;
+				const quality = (options.quality as number) ?? 90;
+				const pngLevel = (options.pngCompressionLevel as number) ?? 6;
+
+				if (fmt === 'jpeg') {
+					sharpInstance = sharpInstance.jpeg({ quality });
+				} else if (fmt === 'webp') {
+					sharpInstance = sharpInstance.webp({ quality });
+				} else if (fmt === 'avif') {
+					sharpInstance = sharpInstance.avif({ quality });
+				} else if (fmt === 'png') {
+					sharpInstance = sharpInstance.png({ compressionLevel: pngLevel });
+				} else if (fmt === 'tiff') {
+					sharpInstance = sharpInstance.tiff({ quality });
+				} else if (fmt === 'gif') {
+					sharpInstance = sharpInstance.gif();
+				} else {
+					sharpInstance = sharpInstance.png({ compressionLevel: pngLevel });
+				}
+
+				const outputBuffer = await sharpInstance.toBuffer();
+
+				// ── Assemble output item ────────────────────────────────────
+				const newItem: INodeExecutionData = {
+					json: deepCopy(item.json),
+					binary: item.binary ? deepCopy(item.binary) : {},
+					pairedItem: { item: itemIndex },
+				};
+
+				const fileName = (options.fileName as string) || `image.${fmt}`;
+				const binaryData = await this.helpers.prepareBinaryData(
+					outputBuffer,
+					fileName,
+					mimeType,
+				);
+				newItem.binary![outputPropertyName] = binaryData;
+
+				returnData.push(newItem);
+			} catch (error) {
+				if (this.continueOnFail()) {
+					returnData.push({
+						json: { error: (error as Error).message },
+						pairedItem: { item: itemIndex },
+					});
+					continue;
+				}
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 			}
 		}
-		return this.prepareOutputData(returnData);
+
+		return [returnData];
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Parameter collector for single-step mode
+// ---------------------------------------------------------------------------
+
+function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemIndex: number): IDataObject {
+	const paramNames: Record<string, string[]> = {
+		blur: ['sigma'],
+		border: ['borderColor', 'borderWidth', 'borderHeight'],
+		composite: ['dataPropertyNameComposite', 'operator', 'positionX', 'positionY'],
+		create: ['backgroundColor', 'width', 'height'],
+		crop: ['width', 'height', 'positionX', 'positionY'],
+		draw: ['color', 'strokeColor', 'strokeWidth', 'cornerRadius', 'endPositionX', 'endPositionY', 'primitive', 'startPositionX', 'startPositionY'],
+		flip: [],
+		flop: [],
+		gamma: ['gammaValue'],
+		grayscale: [],
+		normalize: [],
+		resize: ['width', 'height', 'resizeOption', 'resizeBackground'],
+		rotate: ['backgroundColor', 'rotate'],
+		sepia: [],
+		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
+		shear: ['degreesX', 'degreesY'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateTitle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleColor', 'templateAccentColor'],
+		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
+		tint: ['tintColor'],
+		transparent: ['transparentColor', 'tolerance'],
+		watermark: ['watermarkProperty', 'watermarkGravity', 'watermarkOpacity', 'watermarkScale'],
+	};
+
+	const result: IDataObject = {};
+	const params = paramNames[operation] ?? [];
+	for (const p of params) {
+		try {
+			result[p] = ctx.getNodeParameter(p, itemIndex);
+		} catch (_) {
+			// Parameter not set — use default from node definition
+		}
+	}
+	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Template builder
+// ---------------------------------------------------------------------------
+
+async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
+	const templateName = op.templateName as string;
+	const tpl = IMAGE_TEMPLATES.find((t) => t.name === templateName) ?? IMAGE_TEMPLATES[0];
+	const width = templateName === 'Custom' ? (op.customWidth as number ?? 800) : tpl.width;
+	const height = templateName === 'Custom' ? (op.customHeight as number ?? 600) : tpl.height;
+
+	const bg = hexToRgba(op.templateBgColor as string ?? '#1a1a2e');
+	const titleText = escapeSvg((op.templateTitle as string ?? '').trim());
+	const subtitleText = escapeSvg((op.templateSubtitle as string ?? '').trim());
+	const titleColor = op.templateTitleColor as string ?? '#ffffff';
+	const subtitleColor = op.templateSubtitleColor as string ?? '#cccccc';
+	const accentColor = op.templateAccentColor as string ?? '#e94560';
+
+	// Responsive font sizes
+	const titleFontSize = Math.max(24, Math.round(width * 0.065));
+	const subtitleFontSize = Math.max(16, Math.round(width * 0.033));
+	const padding = Math.round(width * 0.06);
+	const accentBarH = Math.max(4, Math.round(height * 0.006));
+
+	// Title Y position — roughly 45% from top
+	const titleY = Math.round(height * 0.45);
+	const subtitleY = titleY + titleFontSize * 1.6;
+
+	// Accent bar Y — just above title
+	const accentBarY = titleY - titleFontSize * 1.4;
+
+	let titleSvg = '';
+	if (titleText) {
+		titleSvg = `
+		<text
+			x="${padding}" y="${titleY}"
+			font-family="Arial, sans-serif"
+			font-size="${titleFontSize}"
+			font-weight="bold"
+			fill="${titleColor}"
+			filter="url(#shadow)"
+		>${titleText}</text>`;
+	}
+
+	let subtitleSvg = '';
+	if (subtitleText) {
+		subtitleSvg = `
+		<text
+			x="${padding}" y="${subtitleY}"
+			font-family="Arial, sans-serif"
+			font-size="${subtitleFontSize}"
+			fill="${subtitleColor}"
+			opacity="0.9"
+		>${subtitleText}</text>`;
+	}
+
+	const svg = `
+<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="2" dy="2" stdDeviation="4" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect width="${width}" height="${height}" fill="${op.templateBgColor ?? '#1a1a2e'}"/>
+  <!-- Subtle gradient overlay -->
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${accentColor}" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="${accentColor}" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+  <rect width="${width}" height="${height}" fill="url(#grad)"/>
+  <!-- Accent bar -->
+  <rect x="${padding}" y="${accentBarY}" width="${Math.round(width * 0.12)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
+  ${titleSvg}
+  ${subtitleSvg}
+  <!-- Corner decoration -->
+  <rect x="${width - 60}" y="${height - 60}" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
+  <rect x="${width - 24}" y="${height - 60}" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>
+</svg>`;
+
+	const base = sharp({
+		create: {
+			width,
+			height,
+			channels: 4,
+			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
+		},
+	});
+
+	return base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
+}
+
+// ---------------------------------------------------------------------------
+// Operation applier
+// ---------------------------------------------------------------------------
+
+async function applyOperation(
+	ctx: IExecuteFunctions,
+	instance: sharp.Sharp,
+	op: IDataObject,
+	itemIndex: number,
+): Promise<sharp.Sharp> {
+	const operation = op.operation as string;
+
+	if (operation === 'blur') {
+		const sigma = Math.max(0.3, (op.sigma as number) ?? 3);
+		return instance.blur(sigma);
+	}
+
+	if (operation === 'border') {
+		const bw = (op.borderWidth as number) ?? 20;
+		const bh = (op.borderHeight as number) ?? 20;
+		const col = hexToRgba((op.borderColor as string) ?? '#000000');
+		return instance.extend({
+			top: bh,
+			bottom: bh,
+			left: bw,
+			right: bw,
+			background: { r: col.r, g: col.g, b: col.b, alpha: col.alpha },
+		});
+	}
+
+	if (operation === 'composite') {
+		const propName = op.dataPropertyNameComposite as string;
+		ctx.helpers.assertBinaryData(itemIndex, propName);
+		const overlayBuf = await ctx.helpers.getBinaryDataBuffer(itemIndex, propName);
+		return instance.composite([{
+			input: overlayBuf,
+			left: (op.positionX as number) ?? 0,
+			top: (op.positionY as number) ?? 0,
+			blend: (op.operator as sharp.Blend) ?? 'over',
+		}]);
+	}
+
+	if (operation === 'create') {
+		// Already handled before the loop — skip
+		return instance;
+	}
+
+	if (operation === 'template') {
+		// Already handled before the loop — skip
+		return instance;
+	}
+
+	if (operation === 'crop') {
+		return instance.extract({
+			left: (op.positionX as number) ?? 0,
+			top: (op.positionY as number) ?? 0,
+			width: (op.width as number) ?? 500,
+			height: (op.height as number) ?? 500,
+		});
+	}
+
+	if (operation === 'draw') {
+		const meta = await instance.metadata();
+		const imgW = meta.width ?? 800;
+		const imgH = meta.height ?? 600;
+		const fillColor = op.color as string ?? '#ff0000';
+		const strokeColor = op.strokeColor as string ?? '#000000';
+		const strokeWidth = (op.strokeWidth as number) ?? 0;
+		const x1 = (op.startPositionX as number) ?? 0;
+		const y1 = (op.startPositionY as number) ?? 0;
+		const x2 = (op.endPositionX as number) ?? 100;
+		const y2 = (op.endPositionY as number) ?? 100;
+		const primitive = op.primitive as string ?? 'rectangle';
+		const cr = (op.cornerRadius as number) ?? 0;
+		const strokeAttr = strokeWidth > 0 ? `stroke="${strokeColor}" stroke-width="${strokeWidth}"` : 'stroke="none"';
+
+		let shapeSvg = '';
+		if (primitive === 'rectangle') {
+			const w = Math.abs(x2 - x1);
+			const h = Math.abs(y2 - y1);
+			shapeSvg = `<rect x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${w}" height="${h}" rx="${cr}" ry="${cr}" fill="${fillColor}" ${strokeAttr}/>`;
+		} else if (primitive === 'circle') {
+			const cx = (x1 + x2) / 2;
+			const cy = (y1 + y2) / 2;
+			const rx = Math.abs(x2 - x1) / 2;
+			const ry = Math.abs(y2 - y1) / 2;
+			shapeSvg = `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${fillColor}" ${strokeAttr}/>`;
+		} else if (primitive === 'line') {
+			shapeSvg = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${fillColor}" stroke-width="${Math.max(1, strokeWidth || 2)}" stroke-linecap="round"/>`;
+		}
+
+		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">${shapeSvg}</svg>`;
+		return instance.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
+	}
+
+	if (operation === 'flip') {
+		return instance.flip();
+	}
+
+	if (operation === 'flop') {
+		return instance.flop();
+	}
+
+	if (operation === 'gamma') {
+		const g = (op.gammaValue as number) ?? 2.2;
+		return instance.gamma(g);
+	}
+
+	if (operation === 'grayscale') {
+		return instance.grayscale();
+	}
+
+	if (operation === 'normalize') {
+		return instance.normalize();
+	}
+
+	if (operation === 'resize') {
+		const fitMap: Record<string, keyof sharp.FitEnum> = {
+			cover: 'cover',
+			contain: 'contain',
+			fill: 'fill',
+			inside: 'inside',
+			outside: 'outside',
+		};
+		const fit = fitMap[(op.resizeOption as string) ?? 'cover'] ?? 'cover';
+		const bg = op.resizeBackground ? hexToRgba(op.resizeBackground as string) : { r: 0, g: 0, b: 0, alpha: 1 };
+		return instance.resize({
+			width: (op.width as number) ?? 1080,
+			height: (op.height as number) ?? 1080,
+			fit,
+			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
+			withoutEnlargement: false,
+		});
+	}
+
+	if (operation === 'rotate') {
+		const bg = hexToRgba((op.backgroundColor as string) ?? '#00000000');
+		return instance.rotate((op.rotate as number) ?? 0, {
+			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
+		});
+	}
+
+	if (operation === 'sepia') {
+		// Sepia via colour recombination matrix
+		return instance.recomb([
+			[0.3588, 0.7044, 0.1368],
+			[0.2990, 0.5870, 0.1140],
+			[0.2392, 0.4696, 0.0912],
+		]);
+	}
+
+	if (operation === 'sharpen') {
+		const sigma = (op.sharpenSigma as number) ?? 1;
+		const flat = (op.sharpenFlat as number) ?? 1;
+		const jagged = (op.sharpenJagged as number) ?? 2;
+		return instance.sharpen({ sigma, m1: flat, m2: jagged });
+	}
+
+	if (operation === 'shear') {
+		const dx = (op.degreesX as number) ?? 0;
+		const dy = (op.degreesY as number) ?? 10;
+		// Shear via affine transform: [a, b, c, d] where shear-x = tan(dx), shear-y = tan(dy)
+		const tanX = Math.tan((dx * Math.PI) / 180);
+		const tanY = Math.tan((dy * Math.PI) / 180);
+		return instance.affine([1, tanX, tanY, 1], { background: '#00000000' });
+	}
+
+	if (operation === 'text') {
+		const meta = await instance.metadata();
+		const imgW = meta.width ?? 800;
+		const imgH = meta.height ?? 600;
+
+		const rawText = (op.text as string) ?? '';
+		const lineLen = (op.lineLength as number) ?? 40;
+		const wrapped = wrapText(rawText, lineLen);
+		const lines = wrapped.split('\n');
+
+		const fontSize = (op.fontSize as number) ?? 48;
+		const fontColor = (op.fontColor as string) ?? '#ffffff';
+		const fontWeight = (op.fontWeight as string) ?? 'normal';
+		const fontStyle = (op.fontStyle as string) ?? 'normal';
+		const textAlign = (op.textAlign as string) ?? 'middle';
+		const posX = (op.positionX as number) ?? imgW / 2;
+		const posY = (op.positionY as number) ?? imgH / 2;
+		const lineHeight = ((op.lineHeight as number) ?? 1.4) * fontSize;
+		const shadow = (op.textShadow as boolean) ?? false;
+
+		const shadowFilter = shadow
+			? `<filter id="ts"><feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.6"/></filter>`
+			: '';
+		const filterAttr = shadow ? 'filter="url(#ts)"' : '';
+
+		const tspans = lines
+			.map((line, i) => `<tspan x="${posX}" dy="${i === 0 ? 0 : lineHeight}">${escapeSvg(line)}</tspan>`)
+			.join('');
+
+		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">
+  <defs>${shadowFilter}</defs>
+  <text
+    x="${posX}" y="${posY}"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="${fontSize}"
+    font-weight="${fontWeight}"
+    font-style="${fontStyle}"
+    fill="${fontColor}"
+    text-anchor="${textAlign}"
+    dominant-baseline="middle"
+    ${filterAttr}
+  >${tspans}</text>
+</svg>`;
+
+		return instance.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
+	}
+
+	if (operation === 'tint') {
+		const col = hexToRgba((op.tintColor as string) ?? '#ff6b35');
+		return instance.tint({ r: col.r, g: col.g, b: col.b });
+	}
+
+	if (operation === 'transparent') {
+		// Flatten to ensure RGBA, then threshold pixels near the target colour
+		const targetCol = hexToRgba((op.transparentColor as string) ?? '#ffffff');
+		const tolerance = (op.tolerance as number) ?? 30;
+
+		// We use sharp's raw pixel manipulation to set matching pixels to transparent
+		const meta = await instance.metadata();
+		const w = meta.width ?? 0;
+		const h = meta.height ?? 0;
+
+		const rawData = await instance.ensureAlpha().raw().toBuffer();
+		const pixels = new Uint8Array(rawData);
+
+		for (let j = 0; j < w * h; j++) {
+			const idx = j * 4;
+			const dr = Math.abs(pixels[idx] - targetCol.r);
+			const dg = Math.abs(pixels[idx + 1] - targetCol.g);
+			const db = Math.abs(pixels[idx + 2] - targetCol.b);
+			if (dr <= tolerance && dg <= tolerance && db <= tolerance) {
+				pixels[idx + 3] = 0;
+			}
+		}
+
+		return sharp(Buffer.from(pixels), { raw: { width: w, height: h, channels: 4 } });
+	}
+
+	if (operation === 'watermark') {
+		const wmProp = (op.watermarkProperty as string) ?? 'watermark';
+		ctx.helpers.assertBinaryData(itemIndex, wmProp);
+		const wmBuf = await ctx.helpers.getBinaryDataBuffer(itemIndex, wmProp);
+
+		const meta = await instance.metadata();
+		const imgW = meta.width ?? 800;
+		const imgH = meta.height ?? 600;
+		const scalePercent = (op.watermarkScale as number) ?? 20;
+		const opacity = Math.min(1, Math.max(0, ((op.watermarkOpacity as number) ?? 50) / 100));
+		const gravity = (op.watermarkGravity as string) ?? 'southeast';
+
+		// Scale watermark
+		const maxDim = Math.round(Math.max(imgW, imgH) * (scalePercent / 100));
+		const wmResized = await sharp(wmBuf)
+			.resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
+			.ensureAlpha()
+			.raw()
+			.toBuffer({ resolveWithObject: true });
+
+		// Apply opacity to alpha channel
+		const rawPixels = new Uint8Array(wmResized.data);
+		for (let j = 0; j < rawPixels.length / 4; j++) {
+			rawPixels[j * 4 + 3] = Math.round(rawPixels[j * 4 + 3] * opacity);
+		}
+
+		const wmW = wmResized.info.width;
+		const wmH = wmResized.info.height;
+		const wmProcessed = sharp(Buffer.from(rawPixels), { raw: { width: wmW, height: wmH, channels: 4 } }).png();
+
+		return instance.composite([{
+			input: await wmProcessed.toBuffer(),
+			gravity: gravity as sharp.Gravity,
+			blend: 'over',
+		}]);
+	}
+
+	// Unknown operation — return unchanged (pass-through)
+	return instance;
 }
