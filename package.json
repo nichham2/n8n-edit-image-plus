@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-edit-image-plus",
   "version": "0.2.0",
-  "description": "N8N Edit Image Plus — Advanced image editing with Sharp, templates, effects and more",
+  "description": "N8N Edit Image Plus — Advanced image editing with Sharp: templates, effects, watermarks and more. Compatible with n8n v2.30+",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
@@ -11,10 +11,15 @@
     "n8n-community-nodes-edit-image-plus",
     "image",
     "sharp",
-    "template"
+    "template",
+    "image-processing",
+    "resize",
+    "crop",
+    "watermark",
+    "social-media"
   ],
   "license": "MIT",
-  "homepage": "https://unilogica.com",
+  "homepage": "https://github.com/unilogica/n8n-edit-image-plus#readme",
   "author": {
     "name": "Allyson de Paula",
     "email": "depaula@unilogica.com"
@@ -23,6 +28,12 @@
     "type": "git",
     "url": "https://github.com/unilogica/n8n-edit-image-plus.git"
   },
+  "bugs": {
+    "url": "https://github.com/unilogica/n8n-edit-image-plus/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "main": "index.js",
   "scripts": {
     "build": "tsc && gulp build:icons",
@@ -30,16 +41,24 @@
     "format": "prettier nodes --write",
     "lint": "eslint nodes package.json",
     "lintfix": "eslint nodes package.json --fix",
-    "prepublishOnly": "npm run build && npm run lint -c .eslintrc.prepublish.js nodes package.json"
+    "prepublishOnly": "npm run build",
+    "release:patch": "npm version patch && npm run build && npm publish",
+    "release:minor": "npm version minor && npm run build && npm publish",
+    "release:major": "npm version major && npm run build && npm publish"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE.md"
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,
     "nodes": [
       "dist/nodes/EditImagePlus/EditImagePlus.node.js"
     ]
+  },
+  "peerDependencies": {
+    "n8n-workflow": ">=1.0.0"
   },
   "dependencies": {
     "sharp": "^0.33.4"
