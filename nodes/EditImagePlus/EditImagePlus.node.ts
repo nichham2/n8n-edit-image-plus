@@ -7,7 +7,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeConnectionType, NodeOperationError, deepCopy } from 'n8n-workflow';
+import { NodeOperationError, deepCopy } from 'n8n-workflow';
 import sharp from 'sharp';
 
 // ---------------------------------------------------------------------------
@@ -862,8 +862,8 @@ export class EditImagePlus implements INodeType {
 			name: 'Edit Image+',
 			color: '#553399',
 		},
-		inputs: [NodeConnectionType.Main],
-		outputs: [NodeConnectionType.Main],
+		inputs: ['main'],
+		outputs: ['main'],
 		properties: [
 			// ────────────────────────────────────────────────────────────────
 			// Top-level operation selector
