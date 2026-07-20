@@ -28,6 +28,9 @@ jobs:
   publish:
     name: Build & Publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       # ── 1. Checkout ───────────────────────────────────────
@@ -114,9 +117,7 @@ jobs:
           github.event_name == 'push' ||
           (github.event_name == 'workflow_dispatch' &&
            github.event.inputs.dry_run == 'false')
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
       # ── 11. Commit version bump + tag (manual dispatch) ──
       - name: Commit and tag version bump
