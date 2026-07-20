@@ -806,7 +806,7 @@ export class EditImagePlus implements INodeType {
 		name: 'editImagePlus',
 		icon: 'fa:image',
 		group: ['transform'],
-		version: 2,
+		version: 1,
 		description: 'Advanced image editing: blur, crop, resize, text, templates, effects and more — powered by Sharp',
 		defaults: {
 			name: 'Edit Image+',
