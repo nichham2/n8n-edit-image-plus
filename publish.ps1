@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # ============================================================
-#  publish.ps1  —  n8n-nodes-edit-image-plus publish script
+#  publish.ps1  —  n8n-nodes-edit-image-pro publish script
 #  Usage:
 #    .\publish.ps1              # patch bump  (0.2.0 -> 0.2.1)
 #    .\publish.ps1 -Bump minor  # minor bump  (0.2.0 -> 0.3.0)
@@ -100,11 +100,11 @@ npm pack --dry-run 2>&1 | ForEach-Object { Write-Host "  $_" }
 # ── 9. Publish (or dry-run) ──────────────────────────────────
 Write-Step "Publishing to npm..."
 if ($DryRun) {
-    Write-Host "  DRY RUN: would publish n8n-nodes-edit-image-plus@$newVer" -ForegroundColor Yellow
+    Write-Host "  DRY RUN: would publish n8n-nodes-edit-image-pro@$newVer" -ForegroundColor Yellow
     npm pack  # creates a local .tgz for inspection
     Write-Host ""
     Write-Host "  Tarball created locally. Inspect it with:" -ForegroundColor Yellow
-    Write-Host "  tar tzf n8n-nodes-edit-image-plus-$newVer.tgz" -ForegroundColor Yellow
+    Write-Host "  tar tzf n8n-nodes-edit-image-pro-$newVer.tgz" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Reverting version bump (dry-run only)..." -ForegroundColor Yellow
     npm version $oldVer --no-git-tag-version | Out-Null
@@ -121,10 +121,10 @@ if ($DryRun) {
 
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║   🎉  Published n8n-nodes-edit-image-plus@$newVer to npm  ║" -ForegroundColor Green
+    Write-Host "║   🎉  Published n8n-nodes-edit-image-pro@$newVer to npm  ║" -ForegroundColor Green
     Write-Host "╚══════════════════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  npm page : https://www.npmjs.com/package/n8n-nodes-edit-image-plus" -ForegroundColor Cyan
+    Write-Host "  npm page : https://www.npmjs.com/package/n8n-nodes-edit-image-pro" -ForegroundColor Cyan
     Write-Host "  Push tags: git push origin master --tags" -ForegroundColor Cyan
     Write-Host ""
 }

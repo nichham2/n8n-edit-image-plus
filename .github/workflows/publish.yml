@@ -141,17 +141,17 @@ jobs:
           tag_name: v${{ env.NEW_VERSION }}
           name: v${{ env.NEW_VERSION }}
           body: |
-            ## n8n-nodes-edit-image-plus v${{ env.NEW_VERSION }}
+            ## n8n-nodes-edit-image-pro v${{ env.NEW_VERSION }}
 
             ### Install in n8n
             Go to **Settings → Community Nodes → Install** and enter:
             ```
-            n8n-nodes-edit-image-plus
+            n8n-nodes-edit-image-pro
             ```
 
             ### npm
             ```bash
-            npm install n8n-nodes-edit-image-plus
+            npm install n8n-nodes-edit-image-pro
             ```
 
             See [CHANGELOG](https://github.com/unilogica/n8n-edit-image-plus/blob/master/CHANGELOG.md) for details.

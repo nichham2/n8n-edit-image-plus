@@ -1,5 +1,5 @@
 {
-  "name": "n8n-nodes-edit-image-plus",
+  "name": "n8n-nodes-edit-image-pro",
   "version": "0.2.0",
   "description": "N8N Edit Image Plus — Advanced image editing with Sharp: templates, effects, watermarks and more. Compatible with n8n v2.30+",
   "keywords": [
@@ -7,7 +7,7 @@
     "n8n",
     "node",
     "no-code",
-    "n8n-nodes-edit-image-plus",
+    "n8n-nodes-edit-image-pro",
     "n8n-community-nodes-edit-image-plus",
     "image",
     "sharp",

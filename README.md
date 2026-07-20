@@ -1,6 +1,6 @@
-# n8n-nodes-edit-image-plus
+# n8n-nodes-edit-image-pro
 
-[![npm version](https://img.shields.io/npm/v/n8n-nodes-edit-image-plus.svg)](https://www.npmjs.com/package/n8n-nodes-edit-image-plus)
+[![npm version](https://img.shields.io/npm/v/n8n-nodes-edit-image-pro.svg)](https://www.npmjs.com/package/n8n-nodes-edit-image-pro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![n8n community node](https://img.shields.io/badge/n8n-community--node-orange)](https://docs.n8n.io/integrations/community-nodes/)
 
@@ -54,13 +54,13 @@ Instagram Post · Instagram Story · Instagram Portrait · Twitter/X Post · You
 1. Open your n8n instance
 2. Go to **Settings → Community Nodes**
 3. Click **Install**
-4. Enter: `n8n-nodes-edit-image-plus`
+4. Enter: `n8n-nodes-edit-image-pro`
 5. Click **Install**
 
 ### Via npm (self-hosted / Docker)
 
 ```bash
-npm install n8n-nodes-edit-image-plus
+npm install n8n-nodes-edit-image-pro
 ```
 
 Set the `N8N_CUSTOM_EXTENSIONS` environment variable to include the package, or place it in your n8n user data directory under `custom/`.
