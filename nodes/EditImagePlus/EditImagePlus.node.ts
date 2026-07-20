@@ -229,6 +229,25 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Subtitle text colour',
 	},
 	{
+		displayName: 'Quote Text',
+		name: 'templateQuote',
+		type: 'string',
+		typeOptions: { rows: 4 },
+		default: '',
+		placeholder: 'e.g. "To be or not to be..."',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'A centered quote to display on the template. Wraps automatically.',
+	},
+	{
+		displayName: 'Quote Author',
+		name: 'templateQuoteAuthor',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. William Shakespeare',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'The author of the quote, displayed centered at the bottom',
+	},
+	{
 		displayName: 'Accent Color',
 		name: 'templateAccentColor',
 		type: 'color',
@@ -1105,7 +1124,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sepia: [],
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateTitle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleColor', 'templateAccentColor'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateTitle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteAuthor', 'templateAccentColor'],
 		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
@@ -1140,6 +1159,9 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const titleColor = op.templateTitleColor as string ?? '#ffffff';
 	const subtitleColor = op.templateSubtitleColor as string ?? '#cccccc';
 	const accentColor = op.templateAccentColor as string ?? '#e94560';
+	
+	const quoteText = escapeSvg((op.templateQuote as string ?? '').trim());
+	const quoteAuthor = escapeSvg((op.templateQuoteAuthor as string ?? '').trim());
 
 	// Responsive font sizes
 	const titleFontSize = Math.max(24, Math.round(width * 0.065));
@@ -1179,6 +1201,53 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		>${subtitleText}</text>`;
 	}
 
+	let quoteSvg = '';
+	if (quoteText) {
+		const qFontSize = Math.max(24, Math.round(width * 0.055));
+		const maxCharsPerLine = Math.floor(width / (qFontSize * 0.6));
+		const words = quoteText.split(' ');
+		const lines = [];
+		let curLine = '';
+		for (const w of words) {
+			if ((curLine + w).length > maxCharsPerLine) {
+				lines.push(curLine.trim());
+				curLine = w + ' ';
+			} else {
+				curLine += w + ' ';
+			}
+		}
+		if (curLine) lines.push(curLine.trim());
+
+		// Center vertically, accounting for multi-line
+		const startY = Math.round(height * 0.5) - ((lines.length - 1) * (qFontSize * 1.5) / 2);
+		const tspans = lines.map((l, i) => `<tspan x="${width / 2}" dy="${i === 0 ? 0 : qFontSize * 1.5}">${l}</tspan>`).join('');
+		
+		quoteSvg = `
+		<text
+			x="${width / 2}" y="${startY}"
+			font-family="Georgia, serif"
+			font-size="${qFontSize}"
+			font-style="italic"
+			fill="${titleColor}"
+			text-anchor="middle"
+			filter="url(#shadow)"
+		>${tspans}</text>`;
+	}
+
+	let authorSvg = '';
+	if (quoteAuthor) {
+		const aFontSize = Math.max(16, Math.round(width * 0.035));
+		authorSvg = `
+		<text
+			x="${width / 2}" y="${height - padding}"
+			font-family="Arial, sans-serif"
+			font-size="${aFontSize}"
+			fill="${subtitleColor}"
+			text-anchor="middle"
+			opacity="0.9"
+		>— ${quoteAuthor}</text>`;
+	}
+
 	const svg = `
 <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -1200,6 +1269,8 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
   <rect x="${padding}" y="${accentBarY}" width="${Math.round(width * 0.12)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
   ${titleSvg}
   ${subtitleSvg}
+  ${quoteSvg}
+  ${authorSvg}
   <!-- Corner decoration -->
   <rect x="${width - 60}" y="${height - 60}" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
   <rect x="${width - 24}" y="${height - 60}" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>
