@@ -1403,8 +1403,9 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const titleY = Math.round(height * 0.45);
 	const subtitleY = titleY + titleFontSize * 1.6;
 
-	// Accent bar Y — just above title
-	const accentBarY = titleY - titleFontSize * 1.4;
+	// Accent bar X and Y
+	let accentBarX = padding;
+	let accentBarY = titleY - titleFontSize * 1.4;
 
 	let titleSvg = '';
 	if (titleText && layout === 'standard') {
@@ -1450,6 +1451,11 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 
 		// Center vertically, accounting for multi-line
 		const startY = Math.round(height * 0.5) - ((lines.length - 1) * (qFontSize * 1.5) / 2);
+		
+		// Update accent bar to sit above the quote
+		accentBarX = padding;
+		accentBarY = startY - (qFontSize * 1.5);
+
 		const tspans = lines.map((l, i) => `<tspan x="${width / 2}" dy="${i === 0 ? 0 : qFontSize * 1.5}">${l}</tspan>`).join('');
 		
 		quoteSvg = `
@@ -1481,6 +1487,9 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	let memeSvg = '';
 	if (layout === 'meme') {
 		const mFontSize = Math.max(30, Math.round(height * 0.1));
+		
+		// For meme layout, move the accent bar far above the text or hide it by placing it off-screen
+		accentBarY = -1000;
 		if (memeTop) {
 			memeSvg += `
 			<text
@@ -1543,7 +1552,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
   </defs>
   <rect width="${width}" height="${height}" fill="url(#grad)"/>
   <!-- Accent bar -->
-  <rect x="${padding}" y="${accentBarY}" width="${Math.round(width * 0.12)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
+  <rect x="${accentBarX}" y="${accentBarY}" width="${Math.round(width * 0.12)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
   ${titleSvg}
   ${subtitleSvg}
   ${quoteSvg}
