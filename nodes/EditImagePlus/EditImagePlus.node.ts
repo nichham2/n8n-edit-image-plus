@@ -119,6 +119,21 @@ const nodeOperations: INodePropertyOptions[] = [
 // Per-operation parameter definitions
 // ---------------------------------------------------------------------------
 
+const templateFontOptions = [
+	{ name: 'Arial (Sans-Serif)', value: 'Arial, sans-serif' },
+	{ name: 'Cormorant Garamond (Serif)', value: '"Cormorant Garamond", serif' },
+	{ name: 'Courier New (Monospace)', value: '"Courier New", monospace' },
+	{ name: 'Courier Prime (Monospace)', value: '"Courier Prime", monospace' },
+	{ name: 'Georgia (Serif)', value: 'Georgia, serif' },
+	{ name: 'Impact (Sans-Serif)', value: 'Impact, sans-serif' },
+	{ name: 'Lato (Sans-Serif)', value: 'Lato, sans-serif' },
+	{ name: 'Lora (Serif)', value: 'Lora, serif' },
+	{ name: 'Montserrat (Sans-Serif)', value: 'Montserrat, sans-serif' },
+	{ name: 'Playfair Display (Serif)', value: '"Playfair Display", serif' },
+	{ name: 'Times New Roman (Serif)', value: '"Times New Roman", serif' },
+	{ name: 'Custom (Type below)', value: 'custom' },
+];
+
 const nodeOperationOptions: INodeProperties[] = [
 	// ────────────────────────────────────────────────────────────────────────
 	// create
@@ -217,6 +232,23 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Primary headline text (leave blank to skip)',
 	},
 	{
+		displayName: 'Title Font',
+		name: 'templateTitleFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Arial, sans-serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
+		description: 'Font family for the title (Note: Custom fonts must be installed on your n8n OS)',
+	},
+	{
+		displayName: 'Title Font (Custom)',
+		name: 'templateTitleFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'], templateTitleFont: ['custom'] } },
+		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
+	},
+	{
 		displayName: 'Title Color',
 		name: 'templateTitleColor',
 		type: 'color',
@@ -232,6 +264,23 @@ const nodeOperationOptions: INodeProperties[] = [
 		placeholder: 'e.g. Your tagline here',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
 		description: 'Secondary subtitle text (leave blank to skip)',
+	},
+	{
+		displayName: 'Subtitle Font',
+		name: 'templateSubtitleFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Arial, sans-serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
+		description: 'Font family for the subtitle',
+	},
+	{
+		displayName: 'Subtitle Font (Custom)',
+		name: 'templateSubtitleFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'], templateSubtitleFont: ['custom'] } },
+		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
 	},
 	{
 		displayName: 'Subtitle Color',
@@ -252,6 +301,23 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'A centered quote to display on the template. Wraps automatically.',
 	},
 	{
+		displayName: 'Quote Font',
+		name: 'templateQuoteFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Georgia, serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Font family for the quote',
+	},
+	{
+		displayName: 'Quote Font (Custom)',
+		name: 'templateQuoteFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], templateQuoteFont: ['custom'] } },
+		description: 'Type the exact font-family name',
+	},
+	{
 		displayName: 'Quote Author',
 		name: 'templateQuoteAuthor',
 		type: 'string',
@@ -259,6 +325,23 @@ const nodeOperationOptions: INodeProperties[] = [
 		placeholder: 'e.g. William Shakespeare',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
 		description: 'The author of the quote, displayed centered at the bottom',
+	},
+	{
+		displayName: 'Quote Author Font',
+		name: 'templateQuoteAuthorFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Arial, sans-serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Font family for the author',
+	},
+	{
+		displayName: 'Quote Author Font (Custom)',
+		name: 'templateQuoteAuthorFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], templateQuoteAuthorFont: ['custom'] } },
+		description: 'Type the exact font-family name',
 	},
 	{
 		displayName: 'Top Text',
@@ -270,6 +353,23 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Text displayed at the top of the meme',
 	},
 	{
+		displayName: 'Top Text Font',
+		name: 'templateMemeTopFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Impact, sans-serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
+		description: 'Font family for the top text',
+	},
+	{
+		displayName: 'Top Text Font (Custom)',
+		name: 'templateMemeTopFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'], templateMemeTopFont: ['custom'] } },
+		description: 'Type the exact font-family name',
+	},
+	{
 		displayName: 'Bottom Text',
 		name: 'templateMemeBottom',
 		type: 'string',
@@ -279,12 +379,90 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Text displayed at the bottom of the meme',
 	},
 	{
+		displayName: 'Bottom Text Font',
+		name: 'templateMemeBottomFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Impact, sans-serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
+		description: 'Font family for the bottom text',
+	},
+	{
+		displayName: 'Bottom Text Font (Custom)',
+		name: 'templateMemeBottomFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'], templateMemeBottomFont: ['custom'] } },
+		description: 'Type the exact font-family name',
+	},
+	{
 		displayName: 'Accent Color',
 		name: 'templateAccentColor',
 		type: 'color',
 		default: '#e94560',
 		displayOptions: { show: { operation: ['template'] } },
 		description: 'Accent bar / decorative element colour',
+	},
+
+	// -- Watermark (Quote Layout) --
+	{
+		displayName: 'Watermark Text',
+		name: 'quoteWatermarkText',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. @yourhandle',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Optional watermark text (leave blank to skip)',
+	},
+	{
+		displayName: 'Watermark Font',
+		name: 'quoteWatermarkFont',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Arial, sans-serif',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Font family for the watermark',
+	},
+	{
+		displayName: 'Watermark Font (Custom)',
+		name: 'quoteWatermarkFontCustom',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], quoteWatermarkFont: ['custom'] } },
+		description: 'Type the exact font-family name',
+	},
+	{
+		displayName: 'Watermark Color',
+		name: 'quoteWatermarkColor',
+		type: 'color',
+		default: '#ffffff',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+	},
+	{
+		displayName: 'Watermark Opacity (%)',
+		name: 'quoteWatermarkOpacity',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 100 },
+		default: 30,
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+	},
+	{
+		displayName: 'Watermark X Position (%)',
+		name: 'quoteWatermarkX',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 100 },
+		default: 50,
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Horizontal position from 0 (left) to 100 (right)',
+	},
+	{
+		displayName: 'Watermark Y Position (%)',
+		name: 'quoteWatermarkY',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 100 },
+		default: 95,
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Vertical position from 0 (top) to 100 (bottom)',
 	},
 
 	// ────────────────────────────────────────────────────────────────────────
@@ -1199,6 +1377,22 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const memeTop = escapeSvg((op.templateMemeTop as string ?? '').toUpperCase().trim());
 	const memeBottom = escapeSvg((op.templateMemeBottom as string ?? '').toUpperCase().trim());
 
+	// Fonts
+	const titleFont = op.templateTitleFont === 'custom' ? (op.templateTitleFontCustom as string || 'Arial, sans-serif') : (op.templateTitleFont as string || 'Arial, sans-serif');
+	const subtitleFont = op.templateSubtitleFont === 'custom' ? (op.templateSubtitleFontCustom as string || 'Arial, sans-serif') : (op.templateSubtitleFont as string || 'Arial, sans-serif');
+	const quoteFont = op.templateQuoteFont === 'custom' ? (op.templateQuoteFontCustom as string || 'Georgia, serif') : (op.templateQuoteFont as string || 'Georgia, serif');
+	const authorFont = op.templateQuoteAuthorFont === 'custom' ? (op.templateQuoteAuthorFontCustom as string || 'Arial, sans-serif') : (op.templateQuoteAuthorFont as string || 'Arial, sans-serif');
+	const memeTopFont = op.templateMemeTopFont === 'custom' ? (op.templateMemeTopFontCustom as string || 'Impact, sans-serif') : (op.templateMemeTopFont as string || 'Impact, sans-serif');
+	const memeBottomFont = op.templateMemeBottomFont === 'custom' ? (op.templateMemeBottomFontCustom as string || 'Impact, sans-serif') : (op.templateMemeBottomFont as string || 'Impact, sans-serif');
+
+	// Quote Watermark
+	const quoteWmText = escapeSvg((op.quoteWatermarkText as string ?? '').trim());
+	const quoteWmFont = op.quoteWatermarkFont === 'custom' ? (op.quoteWatermarkFontCustom as string || 'Arial, sans-serif') : (op.quoteWatermarkFont as string || 'Arial, sans-serif');
+	const quoteWmColor = op.quoteWatermarkColor as string ?? '#ffffff';
+	const quoteWmOpacity = (op.quoteWatermarkOpacity as number ?? 30) / 100;
+	const quoteWmX = op.quoteWatermarkX as number ?? 50;
+	const quoteWmY = op.quoteWatermarkY as number ?? 95;
+
 	// Responsive font sizes
 	const titleFontSize = Math.max(24, Math.round(width * 0.065));
 	const subtitleFontSize = Math.max(16, Math.round(width * 0.033));
@@ -1217,7 +1411,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		titleSvg = `
 		<text
 			x="${padding}" y="${titleY}"
-			font-family="Arial, sans-serif"
+			font-family="${titleFont}"
 			font-size="${titleFontSize}"
 			font-weight="bold"
 			fill="${titleColor}"
@@ -1230,7 +1424,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		subtitleSvg = `
 		<text
 			x="${padding}" y="${subtitleY}"
-			font-family="Arial, sans-serif"
+			font-family="${subtitleFont}"
 			font-size="${subtitleFontSize}"
 			fill="${subtitleColor}"
 			opacity="0.9"
@@ -1261,7 +1455,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		quoteSvg = `
 		<text
 			x="${width / 2}" y="${startY}"
-			font-family="Georgia, serif"
+			font-family="${quoteFont}"
 			font-size="${qFontSize}"
 			font-style="italic"
 			fill="${titleColor}"
@@ -1276,7 +1470,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		authorSvg = `
 		<text
 			x="${width / 2}" y="${height - padding}"
-			font-family="Arial, sans-serif"
+			font-family="${authorFont}"
 			font-size="${aFontSize}"
 			fill="${subtitleColor}"
 			text-anchor="middle"
@@ -1291,7 +1485,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			memeSvg += `
 			<text
 				x="${width / 2}" y="${mFontSize * 1.1}"
-				font-family="Impact, sans-serif"
+				font-family="${memeTopFont}"
 				font-size="${mFontSize}"
 				font-weight="bold"
 				fill="${titleColor}"
@@ -1304,7 +1498,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			memeSvg += `
 			<text
 				x="${width / 2}" y="${height - (mFontSize * 0.3)}"
-				font-family="Impact, sans-serif"
+				font-family="${memeBottomFont}"
 				font-size="${mFontSize}"
 				font-weight="bold"
 				fill="${titleColor}"
@@ -1313,6 +1507,22 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 				text-anchor="middle"
 			>${memeBottom}</text>`;
 		}
+	}
+
+	let quoteWatermarkSvg = '';
+	if (quoteWmText && layout === 'quote') {
+		const wmFontSize = Math.max(12, Math.round(width * 0.025));
+		const wmX = (width * quoteWmX) / 100;
+		const wmY = (height * quoteWmY) / 100;
+		quoteWatermarkSvg = `
+		<text
+			x="${wmX}" y="${wmY}"
+			font-family="${quoteWmFont}"
+			font-size="${wmFontSize}"
+			fill="${quoteWmColor}"
+			opacity="${quoteWmOpacity}"
+			text-anchor="middle"
+		>${quoteWmText}</text>`;
 	}
 
 	const svg = `
@@ -1339,6 +1549,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
   ${quoteSvg}
   ${authorSvg}
   ${memeSvg}
+  ${quoteWatermarkSvg}
   <!-- Corner decoration -->
   <rect x="${width - 60}" y="${height - 60}" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
   <rect x="${width - 24}" y="${height - 60}" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>
