@@ -1333,7 +1333,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sepia: [],
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateLayout', 'templateTitle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteAuthor', 'templateMemeTop', 'templateMemeBottom', 'templateAccentColor'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateAccentColor', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
 		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
