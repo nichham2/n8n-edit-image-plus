@@ -1412,7 +1412,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		titleSvg = `
 		<text
 			x="${padding}" y="${titleY}"
-			font-family="${titleFont}"
+			font-family='${titleFont}'
 			font-size="${titleFontSize}"
 			font-weight="bold"
 			fill="${titleColor}"
@@ -1425,7 +1425,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		subtitleSvg = `
 		<text
 			x="${padding}" y="${subtitleY}"
-			font-family="${subtitleFont}"
+			font-family='${subtitleFont}'
 			font-size="${subtitleFontSize}"
 			fill="${subtitleColor}"
 			opacity="0.9"
@@ -1461,7 +1461,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		quoteSvg = `
 		<text
 			x="${width / 2}" y="${startY}"
-			font-family="${quoteFont}"
+			font-family='${quoteFont}'
 			font-size="${qFontSize}"
 			font-style="italic"
 			fill="${titleColor}"
@@ -1476,7 +1476,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		authorSvg = `
 		<text
 			x="${width / 2}" y="${height - padding}"
-			font-family="${authorFont}"
+			font-family='${authorFont}'
 			font-size="${aFontSize}"
 			fill="${subtitleColor}"
 			text-anchor="middle"
@@ -1494,7 +1494,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			memeSvg += `
 			<text
 				x="${width / 2}" y="${mFontSize * 1.1}"
-				font-family="${memeTopFont}"
+				font-family='${memeTopFont}'
 				font-size="${mFontSize}"
 				font-weight="bold"
 				fill="${titleColor}"
@@ -1507,7 +1507,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			memeSvg += `
 			<text
 				x="${width / 2}" y="${height - (mFontSize * 0.3)}"
-				font-family="${memeBottomFont}"
+				font-family='${memeBottomFont}'
 				font-size="${mFontSize}"
 				font-weight="bold"
 				fill="${titleColor}"
@@ -1526,7 +1526,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		quoteWatermarkSvg = `
 		<text
 			x="${wmX}" y="${wmY}"
-			font-family="${quoteWmFont}"
+			font-family='${quoteWmFont}'
 			font-size="${wmFontSize}"
 			fill="${quoteWmColor}"
 			opacity="${quoteWmOpacity}"
