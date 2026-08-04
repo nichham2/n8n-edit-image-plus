@@ -1,14 +1,13 @@
 {
   "name": "n8n-nodes-edit-image-pro",
   "version": "0.2.8",
-  "description": "N8N Edit Image Plus — Advanced image editing with Sharp: templates, effects, watermarks and more. Compatible with n8n v2.30+",
+  "description": "Advanced image editing node for n8n — powered by Sharp (libvips). Supports templates, text effects, watermarks, fonts, quote images, meme generation, drop shadows, glows, outlines, and 20+ image operations. No GraphicsMagick required.",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
     "node",
     "no-code",
     "n8n-nodes-edit-image-pro",
-    "n8n-community-nodes-edit-image-plus",
     "image",
     "sharp",
     "template",
@@ -16,20 +15,31 @@
     "resize",
     "crop",
     "watermark",
-    "social-media"
+    "social-media",
+    "text-effects",
+    "drop-shadow",
+    "glow",
+    "meme",
+    "quote",
+    "instagram",
+    "youtube-thumbnail",
+    "font",
+    "typography",
+    "graphic-design",
+    "automation"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/unilogica/n8n-edit-image-plus#readme",
+  "homepage": "https://github.com/nichham2/n8n-edit-image-plus#readme",
   "author": {
-    "name": "Allyson de Paula",
-    "email": "depaula@unilogica.com"
+    "name": "nichham2",
+    "url": "https://github.com/nichham2"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/unilogica/n8n-edit-image-plus.git"
+    "url": "git+https://github.com/nichham2/n8n-edit-image-plus.git"
   },
   "bugs": {
-    "url": "https://github.com/unilogica/n8n-edit-image-plus/issues"
+    "url": "https://github.com/nichham2/n8n-edit-image-plus/issues"
   },
   "engines": {
     "node": ">=18.0.0"

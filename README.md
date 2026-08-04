@@ -1,49 +1,27 @@
 # n8n-nodes-edit-image-pro
 
 [![npm version](https://img.shields.io/npm/v/n8n-nodes-edit-image-pro.svg)](https://www.npmjs.com/package/n8n-nodes-edit-image-pro)
+[![npm downloads](https://img.shields.io/npm/dm/n8n-nodes-edit-image-pro.svg)](https://www.npmjs.com/package/n8n-nodes-edit-image-pro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![n8n community node](https://img.shields.io/badge/n8n-community--node-orange)](https://docs.n8n.io/integrations/community-nodes/)
+[![GitHub](https://img.shields.io/badge/GitHub-source-blue)](https://github.com/nichham2/n8n-edit-image-plus)
 
-Advanced image editing for [n8n](https://n8n.io) — powered by **[Sharp](https://sharp.pixelplumbing.com/)** (libvips).  
-Compatible with **n8n v2.30+**.
+> **Advanced image editing for [n8n](https://n8n.io)** — powered by **[Sharp](https://sharp.pixelplumbing.com/)** (libvips). No GraphicsMagick required. Compatible with **n8n v2.30+**.
+
+Create stunning social media graphics, YouTube thumbnails, quote images, memes, and branded content — all directly inside your n8n workflows.
 
 ---
 
-## ✨ Features
+## ✨ Features at a Glance
 
-### Original operations (rewritten with Sharp)
-| Operation | Description |
-|---|---|
-| **Blur** | Gaussian blur with configurable sigma |
-| **Border** | Add solid-colour padding/border |
-| **Composite** | Overlay an image with 24 blend modes |
-| **Create** | Generate a blank canvas |
-| **Crop** | Extract a region by position and size |
-| **Draw** | Rectangle, circle or line with fill + stroke |
-| **Rotate** | Rotate by any angle with background fill |
-| **Resize** | 5 fit modes: cover, contain, fill, inside, outside |
-| **Shear** | Shear along X/Y via affine transform |
-| **Text** | Styled text with word-wrap, shadow, alignment |
-| **Transparent** | Replace a colour with alpha transparency |
-| **Get Information** | Return image metadata (size, format, DPI…) |
-| **Multi Step** | Chain any operations in a single node |
-
-### New operations in v0.2.0
-| Operation | Description |
-|---|---|
-| 🖼️ **Template** | 15 preset canvases (Instagram, YouTube, LinkedIn…) with title/subtitle/accent |
-| 🔄 **Flip** | Vertical mirror (top ↔ bottom) |
-| 🔄 **Flop** | Horizontal mirror (left ↔ right) |
-| 🎨 **Grayscale** | Convert to black & white |
-| 🎨 **Sepia** | Warm vintage tone |
-| 🎨 **Tint** | Apply a colour hue overlay |
-| ✨ **Sharpen** | Unsharp mask with fine controls |
-| ✨ **Normalize** | Stretch contrast to full dynamic range |
-| ✨ **Gamma** | Gamma correction (1.0–3.0) |
-| 💧 **Watermark** | Opacity-controlled overlay with gravity positioning |
-
-### Template presets
-Instagram Post · Instagram Story · Instagram Portrait · Twitter/X Post · YouTube Thumbnail · Facebook Post · LinkedIn Banner · LinkedIn Post · Pinterest Pin · Open Graph · Email Header · Presentation Slide · Business Card · A4 Document · **Custom**
+- 🎨 **15+ Template Presets** — Instagram, YouTube, Twitter, LinkedIn, and more
+- 🖋️ **3 Layout Modes** — Standard (Title & Subtitle), Quote, Meme
+- 🔡 **Per-Field Font Selection** — Choose from 20+ fonts for every text element
+- 💧 **Watermark Support** — Image watermarks with gravity, and text watermarks with X/Y position control
+- ✨ **Global Text Effects** — Drop Shadow, Glow, Outline, or None
+- 🎨 **Full Color Control** — Background, Gradient Overlay, Accent, and Text colors are all independent
+- 📦 **20+ Image Operations** — Resize, Crop, Composite, Draw, Blur, Sharpen, and many more
+- ⛓️ **Multi-Step Mode** — Chain multiple operations in a single node
 
 ---
 
@@ -54,7 +32,7 @@ Instagram Post · Instagram Story · Instagram Portrait · Twitter/X Post · You
 1. Open your n8n instance
 2. Go to **Settings → Community Nodes**
 3. Click **Install**
-4. Enter: `n8n-nodes-edit-image-pro`
+4. Search for or paste: `n8n-nodes-edit-image-pro`
 5. Click **Install**
 
 ### Via npm (self-hosted / Docker)
@@ -63,81 +41,231 @@ Instagram Post · Instagram Story · Instagram Portrait · Twitter/X Post · You
 npm install n8n-nodes-edit-image-pro
 ```
 
-Set the `N8N_CUSTOM_EXTENSIONS` environment variable to include the package, or place it in your n8n user data directory under `custom/`.
+Set the `N8N_CUSTOM_EXTENSIONS` environment variable to point to the package, or place it in your n8n user data directory under `custom/`.
+
+> **Note for Docker users:** If you are running n8n in Docker and want custom fonts (e.g. Playfair Display, Cormorant Garamond) to render correctly, you must mount your font files into the container. Sharp uses the fonts installed on the host OS for SVG text rendering.
 
 ---
 
-## 🚀 Quick Start Examples
+## 🎨 Template Operation
 
-### Create a YouTube Thumbnail
-1. Add **Edit Image+** node
-2. Set **Operation** → `Template`
-3. Choose **Template** → `YouTube Thumbnail (1280×720)`
-4. Set **Title** → `My Awesome Video`
-5. Set **Subtitle** → `New episode every week`
-6. Pick **Background Color**, **Accent Color**
+The **Template** operation is the flagship feature of this node. It generates fully composed image graphics from scratch — no source image needed.
 
-### Add a watermark to all images
-1. Add **Edit Image+** node after your image source
-2. Set **Operation** → `Watermark`
-3. Set **Watermark Image Property** → property name containing your logo
-4. Set **Opacity** → `40`
-5. Set **Gravity** → `Bottom Right`
+### Layout Modes
 
-### Multi-step: resize → sharpen → add text
-1. Add **Edit Image+** node
-2. Set **Operation** → `Multi Step`
-3. Add step: `Resize` → 1080×1080, fit `Cover`
-4. Add step: `Sharpen` → sigma 1.5
-5. Add step: `Text` → your caption
+| Layout | Description |
+|---|---|
+| **Standard** | Title and Subtitle text, great for blog graphics, social posts, and announcements |
+| **Quote** | Large centered italic quote text with an author attribution at the bottom |
+| **Meme** | Bold Impact-style text at the top and/or bottom of the image |
+
+### Template Presets
+
+| Preset | Dimensions |
+|---|---|
+| Instagram Post | 1080 × 1080 |
+| Instagram Story | 1080 × 1920 |
+| Instagram Portrait | 1080 × 1350 |
+| Twitter / X Post | 1200 × 675 |
+| YouTube Thumbnail | 1280 × 720 |
+| Facebook Post | 1200 × 630 |
+| LinkedIn Banner | 1584 × 396 |
+| LinkedIn Post | 1200 × 627 |
+| Pinterest Pin | 1000 × 1500 |
+| Open Graph | 1200 × 630 |
+| Email Header | 600 × 200 |
+| Presentation Slide | 1920 × 1080 |
+| Business Card | 1050 × 600 |
+| A4 Document | 2480 × 3508 |
+| **Custom** | Any size you specify |
+
+### Color Controls
+
+| Control | Description |
+|---|---|
+| **Background Color** | Solid fill behind everything |
+| **Gradient Overlay Color** | Subtle gradient tint on top of the background (independent from accent) |
+| **Accent Color** | Color of the accent bar and corner decorations |
+| **Title Color** | Color of the title or quote text |
+| **Subtitle Color** | Color of the subtitle or author text |
+
+### Font Controls (Per-Field)
+
+Every text field has its own **Font** dropdown so you can mix and match typography:
+- **Title Font** / **Subtitle Font**
+- **Quote Font** / **Quote Author Font**
+- **Meme Top Font** / **Meme Bottom Font**
+- **Watermark Font**
+
+Available fonts include: Arial, Times New Roman, Georgia, Courier New, Verdana, Trebuchet MS, Impact, **Playfair Display**, **Cormorant Garamond**, **Lora**, **Montserrat**, **Lato**, **Courier Prime**, and more. A **Custom** option lets you type any font name installed on your server.
+
+> **Note:** Web fonts like Playfair Display must be installed on the OS running your n8n server to render. System fonts like Arial and Georgia will always work.
+
+### Text Effects (Global)
+
+Choose one effect that applies to all text on the canvas:
+
+| Effect | Controls |
+|---|---|
+| **Default** | Subtle drop shadow for Standard/Quote; outline stroke for Meme |
+| **None** | Flat text with no effects |
+| **Drop Shadow** | Color, Blur Size, Offset X/Y, Opacity |
+| **Glow** | Color, Blur Size, Opacity |
+| **Outline** | Color, Outline Width |
+
+### Quote Layout: Watermark
+
+When using the **Quote** layout, you can add a subtle text watermark (e.g. `@yourbrand`):
+- **Watermark Text**, **Font**, **Color**, **Opacity (%)**
+- **X Position (%)** and **Y Position (%)** for precise placement anywhere on the canvas
 
 ---
 
-## ⚙️ Output Options
+## 🛠️ All Operations
 
-All operations support these output options:
+### Image Editing
+| Operation | Description |
+|---|---|
+| **Blur** | Gaussian blur with configurable sigma |
+| **Border** | Add solid-colour padding/border |
+| **Composite** | Overlay an image with 24 blend modes |
+| **Create** | Generate a blank canvas with a solid color |
+| **Crop** | Extract a region by position and size |
+| **Draw** | Rectangle, circle, or line with fill + stroke |
+| **Flip** | Vertical mirror (top ↕ bottom) |
+| **Flop** | Horizontal mirror (left ↔ right) |
+| **Gamma** | Gamma correction (1.0–3.0) |
+| **Grayscale** | Convert to black & white |
+| **Normalize** | Stretch contrast to full dynamic range |
+| **Resize** | 5 fit modes: cover, contain, fill, inside, outside |
+| **Rotate** | Rotate by any angle with background fill |
+| **Sepia** | Warm vintage tone |
+| **Sharpen** | Unsharp mask with fine sigma/flat/jagged controls |
+| **Shear** | Shear along X/Y via affine transform |
+| **Text** | Styled text with word-wrap, shadow, alignment, line-height |
+| **Tint** | Apply a colour hue overlay |
+| **Transparent** | Replace a colour with alpha transparency |
+| **Watermark** | Opacity-controlled image overlay with gravity positioning |
+| **Get Information** | Return image metadata (size, format, DPI, …) |
+| **Multi Step** | Chain any combination of operations in a single node |
+
+---
+
+## 📤 Output Options
+
+All operations support the following output settings:
 
 | Option | Description |
 |---|---|
 | **Format** | `png` / `jpeg` / `webp` / `avif` / `tiff` / `gif` |
-| **Quality** | 1–100 for jpeg/webp/avif |
-| **PNG Compression** | 0 (fastest) – 9 (smallest) |
+| **Quality** | 1–100 for jpeg / webp / avif |
+| **PNG Compression** | 0 (fastest) to 9 (smallest) |
 | **Output Property Name** | Save to a different binary property |
 | **File Name** | Override the output filename |
 
 ---
 
-## 🔧 Requirements
+## 🚀 Quick Start Examples
+
+### Create a Quote Image
+
+1. Add an **Edit Image+** node (no input needed)
+2. Set **Operation** → `Template`
+3. Choose **Template** → `Instagram Post (1080x1080)`
+4. Set **Layout Type** → `Quote`
+5. Enter your **Quote Text** and **Quote Author**
+6. Choose your fonts and colors
+7. (Optional) Add a **Watermark** with your handle
+
+### Create a YouTube Thumbnail
+
+1. Add an **Edit Image+** node
+2. Set **Operation** → `Template`
+3. Choose **Template** → `YouTube Thumbnail (1280x720)`
+4. Set **Layout Type** → `Standard`
+5. Set **Title** → `My Awesome Video`
+6. Set **Subtitle** → `Watch Now!`
+7. Pick your **Background**, **Gradient Overlay**, and **Accent** colors
+
+### Add a Watermark to an Image
+
+1. Connect an image binary to **Edit Image+**
+2. Set **Operation** → `Watermark`
+3. Set **Watermark Image Property** → binary property name of your logo
+4. Set **Opacity** → `40`
+5. Set **Gravity** → `Bottom Right`
+
+### Multi-Step: Resize → Sharpen → Add Text
+
+1. Add **Edit Image+** node
+2. Set **Operation** → `Multi Step`
+3. Add Step 1: `Resize` → 1080×1080, fit `Cover`
+4. Add Step 2: `Sharpen` → sigma 1.5
+5. Add Step 3: `Text` → your caption
+
+---
+
+## ⚙️ Requirements
 
 - **n8n** v2.30.0 or later
 - **Node.js** v18 or later
-- No extra system dependencies — Sharp ships pre-built native binaries for Windows, Linux and macOS
+- No extra system dependencies — Sharp ships with pre-built native binaries for Windows, Linux, and macOS
 
 ---
 
 ## 📋 Changelog
 
+### v0.2.8
+- Added **Global Text Effects**: Drop Shadow, Glow, Outline, and None — fully configurable with color, opacity, blur, offset, and width controls
+- Separated **Gradient Overlay Color** from **Accent Color** for independent control
+
+### v0.2.7
+- Gradient overlay color is now independent from the accent color
+
+### v0.2.6
+- Fixed SVG XML parse error caused by font names with double quotes (e.g. `"Cormorant Garamond"`)
+
+### v0.2.5
+- Fixed accent bar positioning in the Quote layout — it now sits correctly above the dynamic multi-line quote
+- Accent bar hidden for Meme layout
+
+### v0.2.4
+- Fixed watermark and font settings not being applied (missing parameters in the single-op collector)
+
+### v0.2.3
+- Added **per-field font selection** for all 6 text fields (Title, Subtitle, Quote, Author, Meme Top, Meme Bottom)
+- Added **Quote Watermark** with text, font, color, opacity, and X/Y position controls
+- All fonts use single-quoted SVG attributes to prevent XML parse errors
+
+### v0.2.2
+- Fixed accent bar overlapping quote text in Quote layout
+- Made accent bar positioning dynamic based on layout and text height
+
+### v0.2.1
+- Added **Quote layout** and **Meme layout** to the Template operation
+- Added dropdown for layout type selection
+
 ### v0.2.0
-- Full rewrite using Sharp (libvips) — no GraphicsMagick required
-- Fixed n8n v2 API compatibility (`NodeConnectionType`, `execute()` return)
+- Full rewrite using **Sharp (libvips)** — no GraphicsMagick required
+- Fixed n8n v2 API compatibility
 - Added 10 new operations: Template, Flip, Flop, Grayscale, Sepia, Tint, Sharpen, Normalize, Gamma, Watermark
+- 15+ template presets (Instagram, YouTube, LinkedIn, etc.)
 - Improved Text: font-weight, italic, alignment, drop shadow, line-height
 - Improved Draw: stroke colour + width, correct ellipse
 - Improved Resize: 5 smart fit modes
 - Added AVIF output format
-- Added per-operation output property name
 
-### v0.1.10
-- Original release — GraphicsMagick based
+### v0.1.x
+- Original release — GraphicsMagick based (no longer maintained)
 
 ---
 
 ## 🤝 Contributing
 
-Pull requests are welcome!
+Pull requests are welcome! Please open an issue first to discuss what you'd like to change.
 
 ```bash
-git clone https://github.com/unilogica/n8n-edit-image-plus.git
+git clone https://github.com/nichham2/n8n-edit-image-plus.git
 cd n8n-edit-image-plus
 npm install --legacy-peer-deps
 npm run dev   # watch mode
