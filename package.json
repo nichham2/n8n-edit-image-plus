@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-edit-image-pro",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Advanced image editing node for n8n — powered by Sharp (libvips). Supports templates, text effects, watermarks, fonts, quote images, meme generation, drop shadows, glows, outlines, and 20+ image operations. No GraphicsMagick required.",
   "keywords": [
     "n8n-community-node-package",
