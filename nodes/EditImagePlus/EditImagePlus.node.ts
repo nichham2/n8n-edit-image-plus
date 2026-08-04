@@ -413,6 +413,66 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Accent bar / decorative element colour',
 	},
 
+	// -- Global Text Effects --
+	{
+		displayName: 'Global Text Effect',
+		name: 'templateTextEffect',
+		type: 'options',
+		options: [
+			{ name: 'Default (Subtle Shadow for Standard, Outline for Meme)', value: 'default' },
+			{ name: 'None', value: 'none' },
+			{ name: 'Drop Shadow', value: 'shadow' },
+			{ name: 'Glow', value: 'glow' },
+			{ name: 'Outline', value: 'outline' },
+		],
+		default: 'default',
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Apply an effect to all main text elements on the canvas',
+	},
+	{
+		displayName: 'Effect Color',
+		name: 'templateEffectColor',
+		type: 'color',
+		default: '#000000',
+		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow', 'outline'] } },
+	},
+	{
+		displayName: 'Effect Opacity (%)',
+		name: 'templateEffectOpacity',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 100 },
+		default: 50,
+		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow'] } },
+	},
+	{
+		displayName: 'Shadow/Glow Blur Size',
+		name: 'templateEffectBlur',
+		type: 'number',
+		default: 4,
+		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow'] } },
+	},
+	{
+		displayName: 'Shadow Offset X',
+		name: 'templateEffectOffsetX',
+		type: 'number',
+		default: 2,
+		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow'] } },
+	},
+	{
+		displayName: 'Shadow Offset Y',
+		name: 'templateEffectOffsetY',
+		type: 'number',
+		default: 2,
+		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow'] } },
+	},
+	{
+		displayName: 'Outline Width',
+		name: 'templateEffectOutlineWidth',
+		type: 'number',
+		default: 2,
+		displayOptions: { show: { operation: ['template'], templateTextEffect: ['outline'] } },
+	},
+
 	// -- Watermark (Quote Layout) --
 	{
 		displayName: 'Watermark Text',
@@ -1342,7 +1402,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sepia: [],
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateAccentColor', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateAccentColor', 'templateTextEffect', 'templateEffectColor', 'templateEffectOpacity', 'templateEffectBlur', 'templateEffectOffsetX', 'templateEffectOffsetY', 'templateEffectOutlineWidth', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
 		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
@@ -1403,6 +1463,45 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const quoteWmX = op.quoteWatermarkX as number ?? 50;
 	const quoteWmY = op.quoteWatermarkY as number ?? 95;
 
+	// Text Effects
+	const textEffect = op.templateTextEffect as string ?? 'default';
+	const effectColor = op.templateEffectColor as string ?? '#000000';
+	const effectOpacity = (op.templateEffectOpacity as number ?? 50) / 100;
+	const effectBlur = op.templateEffectBlur as number ?? 4;
+	const effectOffsetX = op.templateEffectOffsetX as number ?? 2;
+	const effectOffsetY = op.templateEffectOffsetY as number ?? 2;
+	const effectOutlineWidth = op.templateEffectOutlineWidth as number ?? 2;
+
+	let customFilterSvg = '';
+	let applyFilterAttr = '';
+	let applyStrokeAttr = '';
+
+	if (textEffect === 'default') {
+		// Backwards compatibility
+		customFilterSvg = `
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="2" dy="2" stdDeviation="4" flood-opacity="0.5"/>
+    </filter>`;
+		applyFilterAttr = 'filter="url(#shadow)"'; 
+	} else if (textEffect === 'shadow') {
+		customFilterSvg = `
+    <filter id="customEffect" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="${effectOffsetX}" dy="${effectOffsetY}" stdDeviation="${effectBlur}" flood-color="${effectColor}" flood-opacity="${effectOpacity}"/>
+    </filter>`;
+		applyFilterAttr = 'filter="url(#customEffect)"';
+	} else if (textEffect === 'glow') {
+		customFilterSvg = `
+    <filter id="customEffect" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="${effectBlur}" flood-color="${effectColor}" flood-opacity="${effectOpacity}"/>
+    </filter>`;
+		applyFilterAttr = 'filter="url(#customEffect)"';
+	} else if (textEffect === 'outline') {
+		applyStrokeAttr = `stroke="${effectColor}" stroke-width="${effectOutlineWidth}" stroke-linejoin="round"`;
+	}
+
+	const effectAttrMain = textEffect === 'default' ? 'filter="url(#shadow)"' : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
+	const effectAttrSub = textEffect === 'default' ? '' : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
+
 	// Responsive font sizes
 	const titleFontSize = Math.max(24, Math.round(width * 0.065));
 	const subtitleFontSize = Math.max(16, Math.round(width * 0.033));
@@ -1426,7 +1525,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			font-size="${titleFontSize}"
 			font-weight="bold"
 			fill="${titleColor}"
-			filter="url(#shadow)"
+			${effectAttrMain}
 		>${titleText}</text>`;
 	}
 
@@ -1439,6 +1538,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			font-size="${subtitleFontSize}"
 			fill="${subtitleColor}"
 			opacity="0.9"
+			${effectAttrSub}
 		>${subtitleText}</text>`;
 	}
 
@@ -1476,7 +1576,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			font-style="italic"
 			fill="${titleColor}"
 			text-anchor="middle"
-			filter="url(#shadow)"
+			${effectAttrMain}
 		>${tspans}</text>`;
 	}
 
@@ -1491,6 +1591,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			fill="${subtitleColor}"
 			text-anchor="middle"
 			opacity="0.9"
+			${effectAttrSub}
 		>— ${quoteAuthor}</text>`;
 	}
 
@@ -1498,6 +1599,9 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	if (layout === 'meme') {
 		const mFontSize = Math.max(30, Math.round(height * 0.1));
 		
+		const defaultMemeStroke = `stroke="#000000" stroke-width="${Math.max(1, Math.round(mFontSize * 0.05))}"`;
+		const memeEffectAttr = textEffect === 'default' ? defaultMemeStroke : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
+
 		// For meme layout, move the accent bar far above the text or hide it by placing it off-screen
 		accentBarY = -1000;
 		if (memeTop) {
@@ -1508,8 +1612,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 				font-size="${mFontSize}"
 				font-weight="bold"
 				fill="${titleColor}"
-				stroke="#000000"
-				stroke-width="${Math.max(1, Math.round(mFontSize * 0.05))}"
+				${memeEffectAttr}
 				text-anchor="middle"
 			>${memeTop}</text>`;
 		}
@@ -1521,8 +1624,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 				font-size="${mFontSize}"
 				font-weight="bold"
 				fill="${titleColor}"
-				stroke="#000000"
-				stroke-width="${Math.max(1, Math.round(mFontSize * 0.05))}"
+				${memeEffectAttr}
 				text-anchor="middle"
 			>${memeBottom}</text>`;
 		}
@@ -1547,9 +1649,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const svg = `
 <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="2" dy="2" stdDeviation="4" flood-opacity="0.5"/>
-    </filter>
+${customFilterSvg}
   </defs>
   <!-- Background -->
   <rect width="${width}" height="${height}" fill="${op.templateBgColor ?? '#1a1a2e'}"/>
