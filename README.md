@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![n8n community node](https://img.shields.io/badge/n8n-community--node-orange)](https://docs.n8n.io/integrations/community-nodes/)
 [![GitHub](https://img.shields.io/badge/GitHub-source-blue)](https://github.com/nichham2/n8n-edit-image-plus)
+[![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://www.paypal.com/donate/?hosted_button_id=6MJYVDTM95MC4)
 
 > **Advanced image editing for [n8n](https://n8n.io)** — powered by **[Sharp](https://sharp.pixelplumbing.com/)** (libvips). No GraphicsMagick required. Compatible with **n8n v2.30+**.
 
@@ -22,6 +23,14 @@ Create stunning social media graphics, YouTube thumbnails, quote images, memes, 
 - 🎨 **Full Color Control** — Background, Gradient Overlay, Accent, and Text colors are all independent
 - 📦 **20+ Image Operations** — Resize, Crop, Composite, Draw, Blur, Sharpen, and many more
 - ⛓️ **Multi-Step Mode** — Chain multiple operations in a single node
+
+---
+
+## ☕ Support This Project
+
+If this node saves you time or helps your business, consider buying me a coffee! Every donation helps me keep building and maintaining this node.
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?hosted_button_id=6MJYVDTM95MC4)
 
 ---
 
@@ -270,6 +279,16 @@ cd n8n-edit-image-plus
 npm install --legacy-peer-deps
 npm run dev   # watch mode
 ```
+
+---
+
+## 💛 Support This Project
+
+This node is **free and open-source**, built and maintained in personal time. If it's useful to you or saves you hours of work, a small donation goes a long way to keeping it actively maintained and improved!
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?hosted_button_id=6MJYVDTM95MC4)
+
+> **Every contribution, big or small, is deeply appreciated. Thank you! 🙏**
 
 ---
 

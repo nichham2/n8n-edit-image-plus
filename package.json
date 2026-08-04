@@ -41,6 +41,10 @@
   "bugs": {
     "url": "https://github.com/nichham2/n8n-edit-image-plus/issues"
   },
+  "funding": {
+    "type": "individual",
+    "url": "https://www.paypal.com/donate/?hosted_button_id=6MJYVDTM95MC4"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
