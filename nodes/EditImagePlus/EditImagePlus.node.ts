@@ -210,6 +210,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Background fill colour for the template canvas',
 	},
 	{
+		displayName: 'Gradient Overlay Color',
+		name: 'templateGradientColor',
+		type: 'color',
+		default: '#e94560',
+		typeOptions: { showAlpha: false },
+		displayOptions: { show: { operation: ['template'] } },
+		description: 'Color of the subtle gradient overlay on the background',
+	},
+	{
 		displayName: 'Layout Type',
 		name: 'templateLayout',
 		type: 'options',
@@ -1333,7 +1342,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sepia: [],
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateAccentColor', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateAccentColor', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
 		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
@@ -1370,6 +1379,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const titleColor = op.templateTitleColor as string ?? '#ffffff';
 	const subtitleColor = op.templateSubtitleColor as string ?? '#cccccc';
 	const accentColor = op.templateAccentColor as string ?? '#e94560';
+	const gradientColor = op.templateGradientColor as string ?? accentColor;
 	
 	const quoteText = escapeSvg((op.templateQuote as string ?? '').trim());
 	const quoteAuthor = escapeSvg((op.templateQuoteAuthor as string ?? '').trim());
@@ -1546,8 +1556,8 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
   <!-- Subtle gradient overlay -->
   <defs>
     <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="${accentColor}" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="${accentColor}" stop-opacity="0.02"/>
+      <stop offset="0%" stop-color="${gradientColor}" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="${gradientColor}" stop-opacity="0.02"/>
     </linearGradient>
   </defs>
   <rect width="${width}" height="${height}" fill="url(#grad)"/>
