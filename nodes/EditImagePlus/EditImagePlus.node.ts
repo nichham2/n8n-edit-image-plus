@@ -1,6 +1,7 @@
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	ILoadOptionsFunctions,
 	INodeExecutionData,
 	INodeProperties,
 	INodePropertyOptions,
@@ -119,19 +120,26 @@ const nodeOperations: INodePropertyOptions[] = [
 // Per-operation parameter definitions
 // ---------------------------------------------------------------------------
 
-const templateFontOptions = [
-	{ name: 'Arial (Sans-Serif)', value: 'Arial, sans-serif' },
-	{ name: 'Cinzel (Serif)', value: 'Cinzel, serif' },
-	{ name: 'Courier New (Monospace)', value: '"Courier New", monospace' },
-	{ name: 'Georgia (Serif)', value: 'Georgia, serif' },
-	{ name: 'Impact (Sans-Serif)', value: 'Impact, sans-serif' },
-	{ name: 'Montserrat (Sans-Serif)', value: 'Montserrat, sans-serif' },
-	{ name: 'Playfair Display (Serif)', value: '"Playfair Display", serif' },
-	{ name: 'Times New Roman (Serif)', value: '"Times New Roman", serif' },
-	{ name: 'Trebuchet MS (Sans-Serif)', value: '"Trebuchet MS", sans-serif' },
-	{ name: 'Verdana (Sans-Serif)', value: 'Verdana, sans-serif' },
-	{ name: 'Custom (Type below)', value: 'custom' },
-];
+
+/**
+ * Extracts the primary font-family name from a raw value.
+ * Handles legacy CSS stacks like `"Playfair Display", serif` as well as plain names like `Arial`.
+ */
+function normalizeFontFamily(raw: string): string {
+	if (!raw || raw === 'custom') return raw;
+	// Strip outer CSS quotes and take only the first family in a comma-separated stack
+	return raw.split(',')[0].trim().replace(/^["']|["']$/g, '');
+}
+
+/**
+ * Returns a font-family value safe for use inside a double-quoted SVG/CSS attribute.
+ * Multi-word names are wrapped in single quotes: `'Playfair Display'`
+ */
+function toSvgFontFamily(raw: string): string {
+	const name = normalizeFontFamily(raw);
+	return name.includes(' ') ? `'${name}'` : name;
+}
+
 
 const fontStyleOptions = [
 	{ name: 'Normal', value: 'normal' },
@@ -250,7 +258,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Title Font',
 		name: 'templateTitleFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Arial, sans-serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
 		description: 'Font family for the title (Note: Custom fonts must be installed on your n8n OS)',
@@ -293,7 +301,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Subtitle Font',
 		name: 'templateSubtitleFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Arial, sans-serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
 		description: 'Font family for the subtitle',
@@ -337,7 +345,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Quote Font',
 		name: 'templateQuoteFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Georgia, serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
 		description: 'Font family for the quote',
@@ -372,7 +380,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Quote Author Font',
 		name: 'templateQuoteAuthorFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Arial, sans-serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
 		description: 'Font family for the author',
@@ -407,7 +415,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Top Text Font',
 		name: 'templateMemeTopFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Impact, sans-serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
 		description: 'Font family for the top text',
@@ -442,7 +450,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Bottom Text Font',
 		name: 'templateMemeBottomFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Impact, sans-serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
 		description: 'Font family for the bottom text',
@@ -547,7 +555,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Watermark Font',
 		name: 'quoteWatermarkFont',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Arial, sans-serif',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
 		description: 'Font family for the watermark',
@@ -705,7 +713,7 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayName: 'Font Family',
 		name: 'fontFamily',
 		type: 'options',
-		options: templateFontOptions,
+		typeOptions: { loadOptionsMethod: 'getFontList' },
 		default: 'Arial, sans-serif',
 		displayOptions: { show: { operation: ['text'] } },
 		description: 'Font family to use. The font must be installed on your n8n server.',
@@ -1166,6 +1174,64 @@ const nodeOperationOptions: INodeProperties[] = [
 // ---------------------------------------------------------------------------
 
 export class EditImagePlus implements INodeType {
+	// -------------------------------------------------------------------------
+	// Dynamic font list — populated via fontconfig (fc-list) at open time
+	// -------------------------------------------------------------------------
+	methods = {
+		loadOptions: {
+			async getFontList(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				// eslint-disable-next-line @typescript-eslint/no-var-requires
+				const { exec } = require('child_process') as typeof import('child_process');
+				// eslint-disable-next-line @typescript-eslint/no-var-requires
+				const { promisify } = require('util') as typeof import('util');
+				const execAsync = promisify(exec);
+
+				const families = new Set<string>();
+
+				try {
+					// fc-list prints one font-family per line; comma-separated when a font has multiple names
+					const { stdout } = await execAsync('fc-list --format="%{family}\\n"', { timeout: 5000 });
+					for (const line of stdout.split('\n')) {
+						for (const part of line.split(',')) {
+							const name = part.trim().replace(/^["']|["']$/g, '');
+							if (name && name.length > 1) families.add(name);
+						}
+					}
+				} catch {
+					// fontconfig unavailable (e.g. Windows dev machine) — return sensible defaults
+					return [
+						{ name: 'Arial', value: 'Arial' },
+						{ name: 'Cinzel', value: 'Cinzel' },
+						{ name: 'Cormorant Garamond', value: 'Cormorant Garamond' },
+						{ name: 'Courier New', value: 'Courier New' },
+						{ name: 'Georgia', value: 'Georgia' },
+						{ name: 'Impact', value: 'Impact' },
+						{ name: 'Inter', value: 'Inter' },
+						{ name: 'Montserrat', value: 'Montserrat' },
+						{ name: 'Playfair Display', value: 'Playfair Display' },
+						{ name: 'Times New Roman', value: 'Times New Roman' },
+						{ name: 'Trebuchet MS', value: 'Trebuchet MS' },
+						{ name: 'Verdana', value: 'Verdana' },
+						{ name: 'Custom (Type below)', value: 'custom' },
+					];
+				}
+
+				const sorted = [...families].sort((a, b) =>
+					a.toLowerCase().localeCompare(b.toLowerCase()),
+				);
+
+				const options: INodePropertyOptions[] = sorted.map((family) => ({
+					name: family,
+					value: family,
+				}));
+
+				// Always offer a custom escape hatch at the bottom
+				options.push({ name: 'Custom (Type below)', value: 'custom' });
+				return options;
+			},
+		},
+	};
+
 	description: INodeTypeDescription = {
 		displayName: 'Edit Image+',
 		name: 'editImagePlus',
@@ -1522,13 +1588,13 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		return attrs;
 	};
 
-	// Fonts
-	const titleFont = op.templateTitleFont === 'custom' ? (op.templateTitleFontCustom as string || 'Arial, sans-serif') : (op.templateTitleFont as string || 'Arial, sans-serif');
-	const subtitleFont = op.templateSubtitleFont === 'custom' ? (op.templateSubtitleFontCustom as string || 'Arial, sans-serif') : (op.templateSubtitleFont as string || 'Arial, sans-serif');
-	const quoteFont = op.templateQuoteFont === 'custom' ? (op.templateQuoteFontCustom as string || 'Georgia, serif') : (op.templateQuoteFont as string || 'Georgia, serif');
-	const authorFont = op.templateQuoteAuthorFont === 'custom' ? (op.templateQuoteAuthorFontCustom as string || 'Arial, sans-serif') : (op.templateQuoteAuthorFont as string || 'Arial, sans-serif');
-	const memeTopFont = op.templateMemeTopFont === 'custom' ? (op.templateMemeTopFontCustom as string || 'Impact, sans-serif') : (op.templateMemeTopFont as string || 'Impact, sans-serif');
-	const memeBottomFont = op.templateMemeBottomFont === 'custom' ? (op.templateMemeBottomFontCustom as string || 'Impact, sans-serif') : (op.templateMemeBottomFont as string || 'Impact, sans-serif');
+	// Fonts — use toSvgFontFamily to handle both new plain-name values ("Arial") and legacy CSS stacks ("Arial, sans-serif")
+	const titleFont = toSvgFontFamily(op.templateTitleFont === 'custom' ? (op.templateTitleFontCustom as string || 'Arial') : (op.templateTitleFont as string || 'Arial'));
+	const subtitleFont = toSvgFontFamily(op.templateSubtitleFont === 'custom' ? (op.templateSubtitleFontCustom as string || 'Arial') : (op.templateSubtitleFont as string || 'Arial'));
+	const quoteFont = toSvgFontFamily(op.templateQuoteFont === 'custom' ? (op.templateQuoteFontCustom as string || 'Georgia') : (op.templateQuoteFont as string || 'Georgia'));
+	const authorFont = toSvgFontFamily(op.templateQuoteAuthorFont === 'custom' ? (op.templateQuoteAuthorFontCustom as string || 'Arial') : (op.templateQuoteAuthorFont as string || 'Arial'));
+	const memeTopFont = toSvgFontFamily(op.templateMemeTopFont === 'custom' ? (op.templateMemeTopFontCustom as string || 'Impact') : (op.templateMemeTopFont as string || 'Impact'));
+	const memeBottomFont = toSvgFontFamily(op.templateMemeBottomFont === 'custom' ? (op.templateMemeBottomFontCustom as string || 'Impact') : (op.templateMemeBottomFont as string || 'Impact'));
 
 	const titleStyleAttr = parseFontStyle((op.templateTitleFontStyle as string) ?? 'bold');
 	const subtitleStyleAttr = parseFontStyle((op.templateSubtitleFontStyle as string) ?? 'normal');
@@ -1539,7 +1605,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 
 	// Quote Watermark
 	const quoteWmText = escapeSvg((op.quoteWatermarkText as string ?? '').trim());
-	const quoteWmFont = op.quoteWatermarkFont === 'custom' ? (op.quoteWatermarkFontCustom as string || 'Arial, sans-serif') : (op.quoteWatermarkFont as string || 'Arial, sans-serif');
+	const quoteWmFont = toSvgFontFamily(op.quoteWatermarkFont === 'custom' ? (op.quoteWatermarkFontCustom as string || 'Arial') : (op.quoteWatermarkFont as string || 'Arial'));
 	const quoteWmColor = op.quoteWatermarkColor as string ?? '#ffffff';
 	const quoteWmOpacity = (op.quoteWatermarkOpacity as number ?? 30) / 100;
 	const quoteWmX = op.quoteWatermarkX as number ?? 50;
@@ -1603,7 +1669,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		titleSvg = `
 		<text
 			x="${padding}" y="${titleY}"
-			font-family='${titleFont}'
+			font-family="${titleFont}"
 			font-size="${titleFontSize}"${titleStyleAttr}
 			fill="${titleColor}"
 			${effectAttrMain}
@@ -1615,7 +1681,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		subtitleSvg = `
 		<text
 			x="${padding}" y="${subtitleY}"
-			font-family='${subtitleFont}'
+			font-family="${subtitleFont}"
 			font-size="${subtitleFontSize}"${subtitleStyleAttr}
 			fill="${subtitleColor}"
 			opacity="0.9"
@@ -1652,7 +1718,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		quoteSvg = `
 		<text
 			x="${width / 2}" y="${startY}"
-			font-family='${quoteFont}'
+			font-family="${quoteFont}"
 			font-size="${qFontSize}"${quoteStyleAttr}
 			fill="${titleColor}"
 			text-anchor="middle"
@@ -1666,7 +1732,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		authorSvg = `
 		<text
 			x="${width / 2}" y="${height - padding}"
-			font-family='${authorFont}'
+			font-family="${authorFont}"
 			font-size="${aFontSize}"${authorStyleAttr}
 			fill="${subtitleColor}"
 			text-anchor="middle"
@@ -1688,7 +1754,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			memeSvg += `
 			<text
 				x="${width / 2}" y="${mFontSize * 1.1}"
-				font-family='${memeTopFont}'
+				font-family="${memeTopFont}"
 				font-size="${mFontSize}"${memeTopStyleAttr}
 				fill="${titleColor}"
 				${memeEffectAttr}
@@ -1699,7 +1765,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			memeSvg += `
 			<text
 				x="${width / 2}" y="${height - (mFontSize * 0.3)}"
-				font-family='${memeBottomFont}'
+				font-family="${memeBottomFont}"
 				font-size="${mFontSize}"${memeBottomStyleAttr}
 				fill="${titleColor}"
 				${memeEffectAttr}
@@ -1716,7 +1782,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		quoteWatermarkSvg = `
 		<text
 			x="${wmX}" y="${wmY}"
-			font-family='${quoteWmFont}'
+			font-family="${quoteWmFont}"
 			font-size="${wmFontSize}"
 			fill="${quoteWmColor}"
 			opacity="${quoteWmOpacity}"
@@ -1956,11 +2022,12 @@ async function applyOperation(
 			fontStyle = 'italic';
 		}
 
-		// Resolve font family — custom overrides the dropdown value
-		const rawFamily = (op.fontFamily as string) ?? 'Arial, sans-serif';
-		const fontFamily = rawFamily === 'custom'
-			? ((op.fontFamilyCustom as string) || 'Arial, sans-serif')
+		// Resolve font family — custom overrides the dropdown value; toSvgFontFamily handles quoting
+		const rawFamily = (op.fontFamily as string) ?? 'Arial';
+		const resolvedFamily = rawFamily === 'custom'
+			? ((op.fontFamilyCustom as string) || 'Arial')
 			: rawFamily;
+		const fontFamily = toSvgFontFamily(resolvedFamily);
 
 		const textAlign = (op.textAlign as string) ?? 'middle';
 		const posX = (op.positionX as number) ?? imgW / 2;
