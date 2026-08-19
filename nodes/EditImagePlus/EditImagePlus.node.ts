@@ -134,6 +134,13 @@ const templateFontOptions = [
 	{ name: 'Custom (Type below)', value: 'custom' },
 ];
 
+const fontStyleOptions = [
+	{ name: 'Normal', value: 'normal' },
+	{ name: 'Bold', value: 'bold' },
+	{ name: 'Italic', value: 'italic' },
+	{ name: 'Bold Italic', value: 'bold italic' },
+];
+
 const nodeOperationOptions: INodeProperties[] = [
 	// ────────────────────────────────────────────────────────────────────────
 	// create
@@ -258,6 +265,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
 	},
 	{
+		displayName: 'Title Font Style',
+		name: 'templateTitleFontStyle',
+		type: 'options',
+		options: fontStyleOptions,
+		default: 'bold',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
+		description: 'Font style for the title',
+	},
+	{
 		displayName: 'Title Color',
 		name: 'templateTitleColor',
 		type: 'color',
@@ -290,6 +306,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		default: '',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'], templateSubtitleFont: ['custom'] } },
 		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
+	},
+	{
+		displayName: 'Subtitle Font Style',
+		name: 'templateSubtitleFontStyle',
+		type: 'options',
+		options: fontStyleOptions,
+		default: 'normal',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
+		description: 'Font style for the subtitle',
 	},
 	{
 		displayName: 'Subtitle Color',
@@ -327,6 +352,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Type the exact font-family name',
 	},
 	{
+		displayName: 'Quote Font Style',
+		name: 'templateQuoteFontStyle',
+		type: 'options',
+		options: fontStyleOptions,
+		default: 'italic',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Font style for the quote',
+	},
+	{
 		displayName: 'Quote Author',
 		name: 'templateQuoteAuthor',
 		type: 'string',
@@ -351,6 +385,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		default: '',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], templateQuoteAuthorFont: ['custom'] } },
 		description: 'Type the exact font-family name',
+	},
+	{
+		displayName: 'Quote Author Font Style',
+		name: 'templateQuoteAuthorFontStyle',
+		type: 'options',
+		options: fontStyleOptions,
+		default: 'normal',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
+		description: 'Font style for the quote author',
 	},
 	{
 		displayName: 'Top Text',
@@ -379,6 +422,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Type the exact font-family name',
 	},
 	{
+		displayName: 'Top Text Font Style',
+		name: 'templateMemeTopFontStyle',
+		type: 'options',
+		options: fontStyleOptions,
+		default: 'bold',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
+		description: 'Font style for the top text',
+	},
+	{
 		displayName: 'Bottom Text',
 		name: 'templateMemeBottom',
 		type: 'string',
@@ -403,6 +455,15 @@ const nodeOperationOptions: INodeProperties[] = [
 		default: '',
 		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'], templateMemeBottomFont: ['custom'] } },
 		description: 'Type the exact font-family name',
+	},
+	{
+		displayName: 'Bottom Text Font Style',
+		name: 'templateMemeBottomFontStyle',
+		type: 'options',
+		options: fontStyleOptions,
+		default: 'bold',
+		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
+		description: 'Font style for the bottom text',
 	},
 	{
 		displayName: 'Accent Color',
@@ -650,18 +711,6 @@ const nodeOperationOptions: INodeProperties[] = [
 		description: 'Text colour',
 	},
 	{
-		displayName: 'Font Weight',
-		name: 'fontWeight',
-		type: 'options',
-		default: 'normal',
-		displayOptions: { show: { operation: ['text'] } },
-		options: [
-			{ name: 'Normal', value: 'normal' },
-			{ name: 'Bold', value: 'bold' },
-		],
-		description: 'Font weight',
-	},
-	{
 		displayName: 'Font Style',
 		name: 'fontStyle',
 		type: 'options',
@@ -669,7 +718,9 @@ const nodeOperationOptions: INodeProperties[] = [
 		displayOptions: { show: { operation: ['text'] } },
 		options: [
 			{ name: 'Normal', value: 'normal' },
+			{ name: 'Bold', value: 'bold' },
 			{ name: 'Italic', value: 'italic' },
+			{ name: 'Bold Italic', value: 'bold italic' },
 		],
 		description: 'Font style',
 	},
@@ -1402,7 +1453,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sepia: [],
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateAccentColor', 'templateTextEffect', 'templateEffectColor', 'templateEffectOpacity', 'templateEffectBlur', 'templateEffectOffsetX', 'templateEffectOffsetY', 'templateEffectOutlineWidth', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
+		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleFontStyle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleFontStyle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteFontStyle', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateQuoteAuthorFontStyle', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeTopFontStyle', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateMemeBottomFontStyle', 'templateAccentColor', 'templateTextEffect', 'templateEffectColor', 'templateEffectOpacity', 'templateEffectBlur', 'templateEffectOffsetX', 'templateEffectOffsetY', 'templateEffectOutlineWidth', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
 		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
@@ -1447,6 +1498,13 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const memeTop = escapeSvg((op.templateMemeTop as string ?? '').toUpperCase().trim());
 	const memeBottom = escapeSvg((op.templateMemeBottom as string ?? '').toUpperCase().trim());
 
+	const parseFontStyle = (styleStr: string) => {
+		let attrs = '';
+		if (styleStr.includes('bold')) attrs += ' font-weight="bold"';
+		if (styleStr.includes('italic')) attrs += ' font-style="italic"';
+		return attrs;
+	};
+
 	// Fonts
 	const titleFont = op.templateTitleFont === 'custom' ? (op.templateTitleFontCustom as string || 'Arial, sans-serif') : (op.templateTitleFont as string || 'Arial, sans-serif');
 	const subtitleFont = op.templateSubtitleFont === 'custom' ? (op.templateSubtitleFontCustom as string || 'Arial, sans-serif') : (op.templateSubtitleFont as string || 'Arial, sans-serif');
@@ -1454,6 +1512,13 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const authorFont = op.templateQuoteAuthorFont === 'custom' ? (op.templateQuoteAuthorFontCustom as string || 'Arial, sans-serif') : (op.templateQuoteAuthorFont as string || 'Arial, sans-serif');
 	const memeTopFont = op.templateMemeTopFont === 'custom' ? (op.templateMemeTopFontCustom as string || 'Impact, sans-serif') : (op.templateMemeTopFont as string || 'Impact, sans-serif');
 	const memeBottomFont = op.templateMemeBottomFont === 'custom' ? (op.templateMemeBottomFontCustom as string || 'Impact, sans-serif') : (op.templateMemeBottomFont as string || 'Impact, sans-serif');
+
+	const titleStyleAttr = parseFontStyle((op.templateTitleFontStyle as string) ?? 'bold');
+	const subtitleStyleAttr = parseFontStyle((op.templateSubtitleFontStyle as string) ?? 'normal');
+	const quoteStyleAttr = parseFontStyle((op.templateQuoteFontStyle as string) ?? 'italic');
+	const authorStyleAttr = parseFontStyle((op.templateQuoteAuthorFontStyle as string) ?? 'normal');
+	const memeTopStyleAttr = parseFontStyle((op.templateMemeTopFontStyle as string) ?? 'bold');
+	const memeBottomStyleAttr = parseFontStyle((op.templateMemeBottomFontStyle as string) ?? 'bold');
 
 	// Quote Watermark
 	const quoteWmText = escapeSvg((op.quoteWatermarkText as string ?? '').trim());
@@ -1522,8 +1587,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		<text
 			x="${padding}" y="${titleY}"
 			font-family='${titleFont}'
-			font-size="${titleFontSize}"
-			font-weight="bold"
+			font-size="${titleFontSize}"${titleStyleAttr}
 			fill="${titleColor}"
 			${effectAttrMain}
 		>${titleText}</text>`;
@@ -1535,7 +1599,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		<text
 			x="${padding}" y="${subtitleY}"
 			font-family='${subtitleFont}'
-			font-size="${subtitleFontSize}"
+			font-size="${subtitleFontSize}"${subtitleStyleAttr}
 			fill="${subtitleColor}"
 			opacity="0.9"
 			${effectAttrSub}
@@ -1572,8 +1636,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		<text
 			x="${width / 2}" y="${startY}"
 			font-family='${quoteFont}'
-			font-size="${qFontSize}"
-			font-style="italic"
+			font-size="${qFontSize}"${quoteStyleAttr}
 			fill="${titleColor}"
 			text-anchor="middle"
 			${effectAttrMain}
@@ -1587,7 +1650,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 		<text
 			x="${width / 2}" y="${height - padding}"
 			font-family='${authorFont}'
-			font-size="${aFontSize}"
+			font-size="${aFontSize}"${authorStyleAttr}
 			fill="${subtitleColor}"
 			text-anchor="middle"
 			opacity="0.9"
@@ -1609,8 +1672,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			<text
 				x="${width / 2}" y="${mFontSize * 1.1}"
 				font-family='${memeTopFont}'
-				font-size="${mFontSize}"
-				font-weight="bold"
+				font-size="${mFontSize}"${memeTopStyleAttr}
 				fill="${titleColor}"
 				${memeEffectAttr}
 				text-anchor="middle"
@@ -1621,8 +1683,7 @@ async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 			<text
 				x="${width / 2}" y="${height - (mFontSize * 0.3)}"
 				font-family='${memeBottomFont}'
-				font-size="${mFontSize}"
-				font-weight="bold"
+				font-size="${mFontSize}"${memeBottomStyleAttr}
 				fill="${titleColor}"
 				${memeEffectAttr}
 				text-anchor="middle"
@@ -1865,8 +1926,18 @@ async function applyOperation(
 
 		const fontSize = (op.fontSize as number) ?? 48;
 		const fontColor = (op.fontColor as string) ?? '#ffffff';
-		const fontWeight = (op.fontWeight as string) ?? 'normal';
-		const fontStyle = (op.fontStyle as string) ?? 'normal';
+		const rawStyle = (op.fontStyle as string) ?? 'normal';
+		const legacyWeight = (op.fontWeight as string) ?? 'normal';
+		
+		let fontWeight = legacyWeight;
+		let fontStyle = 'normal';
+
+		if (rawStyle.includes('bold')) {
+			fontWeight = 'bold';
+		}
+		if (rawStyle.includes('italic')) {
+			fontStyle = 'italic';
+		}
 		const textAlign = (op.textAlign as string) ?? 'middle';
 		const posX = (op.positionX as number) ?? imgW / 2;
 		const posY = (op.positionY as number) ?? imgH / 2;
