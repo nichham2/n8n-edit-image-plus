@@ -121,16 +121,15 @@ const nodeOperations: INodePropertyOptions[] = [
 
 const templateFontOptions = [
 	{ name: 'Arial (Sans-Serif)', value: 'Arial, sans-serif' },
-	{ name: 'Cormorant Garamond (Serif)', value: '"Cormorant Garamond", serif' },
+	{ name: 'Cinzel (Serif)', value: 'Cinzel, serif' },
 	{ name: 'Courier New (Monospace)', value: '"Courier New", monospace' },
-	{ name: 'Courier Prime (Monospace)', value: '"Courier Prime", monospace' },
 	{ name: 'Georgia (Serif)', value: 'Georgia, serif' },
 	{ name: 'Impact (Sans-Serif)', value: 'Impact, sans-serif' },
-	{ name: 'Lato (Sans-Serif)', value: 'Lato, sans-serif' },
-	{ name: 'Lora (Serif)', value: 'Lora, serif' },
 	{ name: 'Montserrat (Sans-Serif)', value: 'Montserrat, sans-serif' },
 	{ name: 'Playfair Display (Serif)', value: '"Playfair Display", serif' },
 	{ name: 'Times New Roman (Serif)', value: '"Times New Roman", serif' },
+	{ name: 'Trebuchet MS (Sans-Serif)', value: '"Trebuchet MS", sans-serif' },
+	{ name: 'Verdana (Sans-Serif)', value: 'Verdana, sans-serif' },
 	{ name: 'Custom (Type below)', value: 'custom' },
 ];
 
@@ -701,6 +700,24 @@ const nodeOperationOptions: INodeProperties[] = [
 		typeOptions: { minValue: 1 },
 		displayOptions: { show: { operation: ['text'] } },
 		description: 'Font size in pixels',
+	},
+	{
+		displayName: 'Font Family',
+		name: 'fontFamily',
+		type: 'options',
+		options: templateFontOptions,
+		default: 'Arial, sans-serif',
+		displayOptions: { show: { operation: ['text'] } },
+		description: 'Font family to use. The font must be installed on your n8n server.',
+	},
+	{
+		displayName: 'Font Family (Custom)',
+		name: 'fontFamilyCustom',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. Montserrat, sans-serif',
+		displayOptions: { show: { operation: ['text'], fontFamily: ['custom'] } },
+		description: 'Type the exact font-family CSS value (e.g. "Playfair Display", serif)',
 	},
 	{
 		displayName: 'Font Color',
@@ -1454,7 +1471,7 @@ function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemInde
 		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
 		shear: ['degreesX', 'degreesY'],
 		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleFontStyle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleFontStyle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteFontStyle', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateQuoteAuthorFontStyle', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeTopFontStyle', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateMemeBottomFontStyle', 'templateAccentColor', 'templateTextEffect', 'templateEffectColor', 'templateEffectOpacity', 'templateEffectBlur', 'templateEffectOffsetX', 'templateEffectOffsetY', 'templateEffectOutlineWidth', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
-		text: ['text', 'fontSize', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
+		text: ['text', 'fontSize', 'fontFamily', 'fontFamilyCustom', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
 		tint: ['tintColor'],
 		transparent: ['transparentColor', 'tolerance'],
 		watermark: ['watermarkProperty', 'watermarkGravity', 'watermarkOpacity', 'watermarkScale'],
@@ -1928,7 +1945,7 @@ async function applyOperation(
 		const fontColor = (op.fontColor as string) ?? '#ffffff';
 		const rawStyle = (op.fontStyle as string) ?? 'normal';
 		const legacyWeight = (op.fontWeight as string) ?? 'normal';
-		
+
 		let fontWeight = legacyWeight;
 		let fontStyle = 'normal';
 
@@ -1938,6 +1955,13 @@ async function applyOperation(
 		if (rawStyle.includes('italic')) {
 			fontStyle = 'italic';
 		}
+
+		// Resolve font family — custom overrides the dropdown value
+		const rawFamily = (op.fontFamily as string) ?? 'Arial, sans-serif';
+		const fontFamily = rawFamily === 'custom'
+			? ((op.fontFamilyCustom as string) || 'Arial, sans-serif')
+			: rawFamily;
+
 		const textAlign = (op.textAlign as string) ?? 'middle';
 		const posX = (op.positionX as number) ?? imgW / 2;
 		const posY = (op.positionY as number) ?? imgH / 2;
@@ -1957,7 +1981,7 @@ async function applyOperation(
   <defs>${shadowFilter}</defs>
   <text
     x="${posX}" y="${posY}"
-    font-family="Arial, Helvetica, sans-serif"
+    font-family="${fontFamily}"
     font-size="${fontSize}"
     font-weight="${fontWeight}"
     font-style="${fontStyle}"
