@@ -133,11 +133,11 @@ function normalizeFontFamily(raw: string): string {
 
 /**
  * Returns a font-family value safe for use inside a double-quoted SVG/CSS attribute.
- * Multi-word names are wrapped in single quotes: `'Playfair Display'`
+ * NOTE: librsvg has a known bug where it fails to parse font-family strings containing 
+ * single or double quotes. Therefore, we always return the unquoted name even if it has spaces.
  */
 function toSvgFontFamily(raw: string): string {
-	const name = normalizeFontFamily(raw);
-	return name.includes(' ') ? `'${name}'` : name;
+	return normalizeFontFamily(raw);
 }
 
 
@@ -2038,25 +2038,28 @@ async function applyOperation(
 		const shadowFilter = shadow
 			? `<filter id="ts"><feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.6"/></filter>`
 			: '';
-		const filterAttr = shadow ? 'filter="url(#ts)"' : '';
 
 		const tspans = lines
 			.map((line, i) => `<tspan x="${posX}" dy="${i === 0 ? 0 : lineHeight}">${escapeSvg(line)}</tspan>`)
 			.join('');
 
-		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">
-  <defs>${shadowFilter}</defs>
-  <text
+		const textBaseAttrs = `
     x="${posX}" y="${posY}"
     font-family="${fontFamily}"
     font-size="${fontSize}"
     font-weight="${fontWeight}"
     font-style="${fontStyle}"
-    fill="${fontColor}"
     text-anchor="${textAlign}"
-    dominant-baseline="middle"
-    ${filterAttr}
-  >${tspans}</text>
+    dominant-baseline="middle"`;
+
+		const shadowElement = shadow 
+			? `<text ${textBaseAttrs} fill="${fontColor}" filter="url(#ts)">${tspans}</text>`
+			: '';
+
+		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">
+  <defs>${shadowFilter}</defs>
+  ${shadowElement}
+  <text ${textBaseAttrs} fill="${fontColor}">${tspans}</text>
 </svg>`;
 
 		return instance.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
