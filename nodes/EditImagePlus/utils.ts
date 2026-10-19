@@ -152,7 +152,7 @@ export function sanitizeCssColor(color: unknown, fallback: string): string {
 	const parsed = parseCssColorToRgba(color);
 	if (!parsed) {
 		const fbParsed = parseCssColorToRgba(fallback);
-		if (!fbParsed) return fallback;
+		if (!fbParsed) return '#000000';
 		if (fbParsed.alpha < 1) {
 			return `rgba(${fbParsed.r}, ${fbParsed.g}, ${fbParsed.b}, ${fbParsed.alpha})`;
 		}
@@ -171,8 +171,7 @@ export function sanitizeCssColor(color: unknown, fallback: string): string {
  */
 export function hexToRgba(hex: unknown, fallback = '#000000'): RgbaColor {
 	return (
-		parseCssColorToRgba(hex) ??
-		parseCssColorToRgba(fallback) ?? { r: 0, g: 0, b: 0, alpha: 1 }
+		parseCssColorToRgba(hex) ?? parseCssColorToRgba(fallback) ?? { r: 0, g: 0, b: 0, alpha: 1 }
 	);
 }
 
@@ -213,14 +212,16 @@ export function wrapText(text: string, maxLineLength: number): string {
  * Escapes characters that would break inline SVG text or attributes, and strips invalid XML 1.0 control chars.
  */
 export function escapeSvg(str: unknown): string {
-	return String(str ?? '')
-		// eslint-disable-next-line no-control-regex
-		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&apos;');
+	return (
+		String(str ?? '')
+			// eslint-disable-next-line no-control-regex
+			.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&apos;')
+	);
 }
 
 /**
@@ -229,8 +230,11 @@ export function escapeSvg(str: unknown): string {
  */
 export function normalizeFontFamily(raw: unknown, fallback = 'Arial'): string {
 	if (typeof raw !== 'string' || !raw.trim() || raw === 'custom') return fallback;
-	const primary = raw.split(',')[0].trim().replace(/^["']|["']$/g, '');
-	const sanitized = primary.replace(/[^a-zA-Z0-9\s_\-.]/g, '').trim();
+	const primary = raw
+		.split(',')[0]
+		.trim()
+		.replace(/^["']|["']$/g, '');
+	const sanitized = primary.replace(/[^\p{L}\p{N}\s_\-.]/gu, '').trim();
 	return sanitized || fallback;
 }
 
@@ -303,9 +307,22 @@ export function normalizeOutputFileName(rawFileName: unknown, format: string): s
 		return `image.${ext}`;
 	}
 
+	const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+
+	const dotIndex = safeSegment.indexOf('.');
+	const primaryStem = dotIndex !== -1 ? safeSegment.slice(0, dotIndex).trim() : safeSegment;
+	if (WINDOWS_RESERVED_NAMES.test(primaryStem)) {
+		const remainder = dotIndex !== -1 ? safeSegment.slice(dotIndex) : '';
+		return normalizeOutputFileName(`image${remainder}`, format);
+	}
+
 	const extMatch = /^(.*?)\.(png|jpe?g|webp|avif|tiff?|gif)$/i.exec(safeSegment);
+
 	if (extMatch) {
-		const stem = extMatch[1].trim() || 'image';
+		let stem = extMatch[1].trim() || 'image';
+		if (WINDOWS_RESERVED_NAMES.test(stem)) {
+			stem = 'image';
+		}
 		const existingExt = extMatch[2].toLowerCase();
 		if (
 			existingExt === ext ||
@@ -315,6 +332,10 @@ export function normalizeOutputFileName(rawFileName: unknown, format: string): s
 			return `${stem}.${existingExt}`;
 		}
 		return `${stem}.${ext}`;
+	}
+
+	if (WINDOWS_RESERVED_NAMES.test(safeSegment)) {
+		return `image.${ext}`;
 	}
 
 	return `${safeSegment}.${ext}`;
@@ -343,5 +364,3 @@ export function formatSafeMetadata(meta: sharp.Metadata): Record<string, unknown
 	}
 	return out;
 }
-
-

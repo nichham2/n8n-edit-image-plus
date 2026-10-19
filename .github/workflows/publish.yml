@@ -128,15 +128,7 @@ jobs:
           path: '*.tgz'
           retention-days: 7
 
-      # ── 10b. Publish to npm ──────────────────────────────
-      - name: Publish to npm
-        if: >
-          github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' &&
-           github.event.inputs.dry_run == 'false')
-        run: npm publish --provenance --access public
-
-      # ── 11. Commit version bump + tag (manual dispatch) ──
+      # ── 10b. Commit version bump + tag (manual dispatch) ──
       - name: Commit and tag version bump
         if: >
           github.event_name == 'workflow_dispatch' &&
@@ -148,6 +140,16 @@ jobs:
           git commit -m "chore: release v${RELEASE_VER}" || echo "No changes to commit"
           git tag "v${RELEASE_VER}" || echo "Tag already exists"
           git push origin HEAD:master --tags
+
+      # ── 11. Publish to npm ──────────────────────────────
+      - name: Publish to npm
+        if: >
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' &&
+           github.event.inputs.dry_run == 'false')
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ── 12. Create GitHub Release ─────────────────────────
       - name: Create GitHub Release

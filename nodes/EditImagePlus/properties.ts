@@ -129,7 +129,11 @@ export const nodeOperationOptions: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { operation: ['template'], templateLayout: ['standard'], templateTitleFont: ['custom'] },
+			show: {
+				operation: ['template'],
+				templateLayout: ['standard'],
+				templateTitleFont: ['custom'],
+			},
 		},
 		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
 	},
@@ -147,7 +151,9 @@ export const nodeOperationOptions: INodeProperties[] = [
 		name: 'templateTitleColor',
 		type: 'color',
 		default: '#ffffff',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard', 'quote', 'meme'] } },
+		displayOptions: {
+			show: { operation: ['template'], templateLayout: ['standard', 'quote', 'meme'] },
+		},
 		description: 'Primary text colour',
 	},
 	{
@@ -174,7 +180,11 @@ export const nodeOperationOptions: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { operation: ['template'], templateLayout: ['standard'], templateSubtitleFont: ['custom'] },
+			show: {
+				operation: ['template'],
+				templateLayout: ['standard'],
+				templateSubtitleFont: ['custom'],
+			},
 		},
 		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
 	},
@@ -257,7 +267,11 @@ export const nodeOperationOptions: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { operation: ['template'], templateLayout: ['quote'], templateQuoteAuthorFont: ['custom'] },
+			show: {
+				operation: ['template'],
+				templateLayout: ['quote'],
+				templateQuoteAuthorFont: ['custom'],
+			},
 		},
 		description: 'Type the exact font-family name',
 	},
@@ -331,7 +345,11 @@ export const nodeOperationOptions: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { operation: ['template'], templateLayout: ['meme'], templateMemeBottomFont: ['custom'] },
+			show: {
+				operation: ['template'],
+				templateLayout: ['meme'],
+				templateMemeBottomFont: ['custom'],
+			},
 		},
 		description: 'Type the exact font-family name',
 	},
@@ -374,7 +392,9 @@ export const nodeOperationOptions: INodeProperties[] = [
 		name: 'templateEffectColor',
 		type: 'color',
 		default: '#000000',
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow', 'outline'] } },
+		displayOptions: {
+			show: { operation: ['template'], templateTextEffect: ['shadow', 'glow', 'outline'] },
+		},
 	},
 	{
 		displayName: 'Effect Opacity (%)',
@@ -849,9 +869,21 @@ export const nodeOperationOptions: INodeProperties[] = [
 		options: [
 			{ name: 'Contain (Letterbox)', value: 'contain', description: 'Scales to fit, adds padding' },
 			{ name: 'Cover (Crop to Fill)', value: 'cover', description: 'Scales to fill, crops excess' },
-			{ name: 'Fill (Ignore Aspect Ratio)', value: 'fill', description: 'Stretches to exact dimensions' },
-			{ name: 'Inside (Max Area)', value: 'inside', description: 'Scales down only if larger than dimensions' },
-			{ name: 'Outside (Min Area)', value: 'outside', description: 'Scales up only if smaller than dimensions' },
+			{
+				name: 'Fill (Ignore Aspect Ratio)',
+				value: 'fill',
+				description: 'Stretches to exact dimensions',
+			},
+			{
+				name: 'Inside (Max Area)',
+				value: 'inside',
+				description: 'Scales down only if larger than dimensions',
+			},
+			{
+				name: 'Outside (Min Area)',
+				value: 'outside',
+				description: 'Scales up only if smaller than dimensions',
+			},
 		],
 		default: 'cover',
 		displayOptions: { show: { operation: ['resize'] } },

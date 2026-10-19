@@ -537,6 +537,264 @@ async function runTests() {
 		ok('[Pass 3 HIGH-01] Input images with EXIF Orientation > 1 are auto-oriented to visual dimensions before operations');
 	}
 
+	// 10. Batch 1-4 Production Readiness & Comprehensive Operations Coverage
+	{
+		const node = new EditImagePlus();
+
+		function createMockCtx(params, inputItems) {
+			return {
+				getInputData: () => inputItems,
+				getNodeParameter: (name, _idx, fallback) =>
+					params[name] !== undefined ? params[name] : fallback,
+				getNode: () => ({ name: 'Edit Image+' }),
+				continueOnFail: () => false,
+				helpers: {
+					assertBinaryData: (idx, prop) => {
+						if (!inputItems[idx].binary || !inputItems[idx].binary[prop]) {
+							throw new Error(`Missing binary property "${prop}"`);
+						}
+					},
+					getBinaryDataBuffer: async (idx, prop) => inputItems[idx].binary[prop]._buf,
+					prepareBinaryData: async (buf, fileName, mimeType) => ({
+						_buf: buf,
+						fileName,
+						mimeType,
+					}),
+				},
+			};
+		}
+
+		const sampleImg = await sharp({
+			create: { width: 100, height: 80, channels: 4, background: { r: 50, g: 100, b: 150, alpha: 1 } },
+		})
+			.png()
+			.toBuffer();
+
+		// 10a. Get Information preserves item.json fields and binary data (CRIT-02)
+		const infoCtx = createMockCtx(
+			{ operation: 'information', dataPropertyName: 'data' },
+			[{ json: { workflowId: 999, userEmail: 'test@example.com' }, binary: { data: { _buf: sampleImg } } }],
+		);
+		const [infoRes] = await node.execute.call(infoCtx);
+		assert.strictEqual(infoRes[0].json.workflowId, 999, 'Get Information must preserve original item.json fields');
+		assert.strictEqual(infoRes[0].json.userEmail, 'test@example.com');
+		assert.strictEqual(infoRes[0].json.width, 100);
+		assert.strictEqual(infoRes[0].json.height, 80);
+		assert(infoRes[0].binary && infoRes[0].binary.data, 'Get Information must preserve binary image data');
+		ok('[CRIT-02] Get Information preserves item.json workflow context and binary data');
+
+		// 10b. Prototype pollution prevention on outputPropertyName & dataPropertyName (CRIT-02 & CRIT-03)
+		const protoCtx = createMockCtx(
+			{
+				operation: 'flip',
+				dataPropertyName: '__proto__',
+				options: { outputPropertyName: '__proto__' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg } } }],
+		);
+		const [protoRes] = await node.execute.call(protoCtx);
+		assert(protoRes[0].binary.data, 'Output property must fall back to safe data property');
+		assert.strictEqual(Object.prototype.polluted, undefined, 'Prototype must not be polluted');
+		assert.strictEqual(Object.getPrototypeOf(protoRes[0].binary), Object.prototype, 'Binary object prototype must remain intact');
+		ok('[CRIT-02 & CRIT-03] Prototype pollution via dataPropertyName & outputPropertyName is neutralized');
+
+		// 10b-2. Input binary filename preservation when options.fileName is blank (CRIT-01)
+		const fileNameInheritCtx = createMockCtx(
+			{
+				operation: 'flip',
+				dataPropertyName: 'data',
+				options: { format: 'png' }, // fileName omitted
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg, fileName: 'customer-avatar-102.jpg' } } }],
+		);
+		const [inheritRes] = await node.execute.call(fileNameInheritCtx);
+		assert.strictEqual(
+			inheritRes[0].binary.data.fileName,
+			'customer-avatar-102.png',
+			'Output binary should inherit input binary filename stem and update format extension',
+		);
+		ok('[CRIT-01] Input binary fileName is preserved when options.fileName is omitted');
+
+		// 10c. Windows reserved DOS device name normalization (HIGH-03 & HIGH-04)
+		assert.strictEqual(normalizeOutputFileName('CON.png', 'png'), 'image.png');
+		assert.strictEqual(normalizeOutputFileName('NUL.jpg', 'jpeg'), 'image.jpg');
+		assert.strictEqual(normalizeOutputFileName('AUX.webp', 'webp'), 'image.webp');
+		assert.strictEqual(normalizeOutputFileName('COM1.png', 'png'), 'image.png');
+		assert.strictEqual(normalizeOutputFileName('LPT9', 'png'), 'image.png');
+		assert.strictEqual(normalizeOutputFileName('CON.tar.gz', 'png'), 'image.tar.gz.png');
+		assert.strictEqual(normalizeOutputFileName('AUX.backup.png', 'png'), 'image.backup.png');
+		ok('[HIGH-03 & HIGH-04] Windows DOS reserved device names (CON, NUL, AUX, COM1-9, compound extensions) are normalized to image.ext');
+
+		// 10d. Fallback sanitization in sanitizeCssColor (MED-05)
+		assert.strictEqual(sanitizeCssColor('invalid', 'also-invalid'), '#000000');
+		ok('[MED-05] sanitizeCssColor returns safe #000000 when both candidate and fallback are invalid');
+
+		// 10e. International Unicode font family preservation (HIGH-02)
+		assert.strictEqual(normalizeFontFamily('苹方'), '苹方');
+		assert.strictEqual(normalizeFontFamily('メイリオ'), 'メイリオ');
+		assert.strictEqual(normalizeFontFamily('Noto Serif 简体中文'), 'Noto Serif 简体中文');
+		assert.strictEqual(normalizeFontFamily('Arial" /><script>alert(1)</script>'), 'Arial scriptalert1script');
+		ok('[HIGH-02] normalizeFontFamily preserves international Unicode scripts (CJK, Cyrillic, Arabic) while blocking SVG delimiters');
+
+		// 10f. Root index.js exports EditImagePlus node class (MED-01)
+		const indexExport = require('../index.js');
+		assert(indexExport && typeof indexExport.EditImagePlus === 'function', 'index.js must export EditImagePlus class');
+		ok('[MED-01] Root index.js successfully exports EditImagePlus class');
+
+		// 10g. Full coverage for blur, border, flip, flop, gamma, normalize, sharpen, tint (LOW-04)
+		const allOpsCtx = createMockCtx(
+			{
+				operation: 'multiStep',
+				dataPropertyName: 'data',
+				options: { format: 'png' },
+				operations: {
+					operations: [
+						{ operation: 'blur', sigma: 1 },
+						{ operation: 'border', borderWidth: 5, borderHeight: 5, borderColor: '#ff0000' },
+						{ operation: 'flip' },
+						{ operation: 'flop' },
+						{ operation: 'gamma', gammaValue: 2.2 },
+						{ operation: 'normalize' },
+						{ operation: 'sharpen', sharpenSigma: 1, sharpenFlat: 1, sharpenJagged: 2 },
+						{ operation: 'tint', tintColor: '#00ff00' },
+					],
+				},
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg } } }],
+		);
+		const [allOpsRes] = await node.execute.call(allOpsCtx);
+		const allOpsMeta = await sharp(allOpsRes[0].binary.data._buf).metadata();
+		// Initial 100x80 + border 5 on each side = 110x90
+		assert.strictEqual(allOpsMeta.width, 110);
+		assert.strictEqual(allOpsMeta.height, 90);
+		ok('[LOW-04] Full operation coverage: blur, border, flip, flop, gamma, normalize, sharpen, tint executed cleanly');
+
+		// 10h. Composite and Watermark EXIF auto-rotation (CRIT-04)
+		const overlayWithExif6 = await sharp({
+			create: { width: 60, height: 40, channels: 3, background: { r: 255, g: 255, b: 0 } },
+		})
+			.withMetadata({ orientation: 6 })
+			.jpeg()
+			.toBuffer();
+
+		const compExifCtx = createMockCtx(
+			{
+				operation: 'composite',
+				dataPropertyName: 'data',
+				dataPropertyNameComposite: 'overlay',
+				positionX: 0,
+				positionY: 0,
+				options: { format: 'png' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg }, overlay: { _buf: overlayWithExif6 } } }],
+		);
+		const [compExifRes] = await node.execute.call(compExifCtx);
+		const compExifMeta = await sharp(compExifRes[0].binary.data._buf).metadata();
+		assert.strictEqual(compExifMeta.width, 100);
+		assert.strictEqual(compExifMeta.height, 80);
+
+		const wmExifCtx = createMockCtx(
+			{
+				operation: 'watermark',
+				dataPropertyName: 'data',
+				watermarkProperty: 'wm',
+				watermarkScale: 20,
+				watermarkOpacity: 50,
+				options: { format: 'png' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg }, wm: { _buf: overlayWithExif6 } } }],
+		);
+		const [wmExifRes] = await node.execute.call(wmExifCtx);
+		const wmExifMeta = await sharp(wmExifRes[0].binary.data._buf).metadata();
+		assert.strictEqual(wmExifMeta.width, 100);
+		assert.strictEqual(wmExifMeta.height, 80);
+		ok('[CRIT-04] Composite and Watermark auto-orient secondary EXIF orientation > 1 inputs cleanly');
+
+		// 10i. Non-string fontStyle & fontWeight type guards (HIGH-01)
+		const typeGuardCtx = createMockCtx(
+			{
+				operation: 'text',
+				dataPropertyName: 'data',
+				text: 'Defensive Style Test',
+				fontStyle: 700, // numeric instead of string
+				fontWeight: true, // boolean instead of string
+				options: { format: 'png' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg } } }],
+		);
+		const [typeGuardRes] = await node.execute.call(typeGuardCtx);
+		assert(typeGuardRes[0].binary.data._buf.length > 0, 'Text operation should not crash with numeric/boolean fontStyle');
+
+		const tplTypeGuard = await buildTemplateInstance({
+			templateName: 'Custom',
+			customWidth: 400,
+			customHeight: 300,
+			templateLayout: 'standard',
+			templateTitle: 'Safe Template',
+			templateTitleFontStyle: 600, // numeric instead of string
+		});
+		assert((await tplTypeGuard.png().toBuffer()).length > 0, 'buildTemplateInstance should not crash with numeric style');
+		ok('[HIGH-01] Non-string fontStyle & fontWeight handled safely without TypeError');
+
+		// 10j. Invalid blend mode and watermark gravity fallback (HIGH-02)
+		const badBlendCtx = createMockCtx(
+			{
+				operation: 'composite',
+				dataPropertyName: 'data',
+				dataPropertyNameComposite: 'overlay',
+				operator: 'MALICIOUS_OR_INVALID_BLEND',
+				options: { format: 'png' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg }, overlay: { _buf: sampleImg } } }],
+		);
+		const [badBlendRes] = await node.execute.call(badBlendCtx);
+		assert(badBlendRes[0].binary.data._buf.length > 0, 'Composite must fall back to over on invalid blend mode');
+
+		const badGravCtx = createMockCtx(
+			{
+				operation: 'watermark',
+				dataPropertyName: 'data',
+				watermarkProperty: 'wm',
+				watermarkGravity: 'INVALID_GRAVITY',
+				options: { format: 'png' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg }, wm: { _buf: sampleImg } } }],
+		);
+		const [badGravRes] = await node.execute.call(badGravCtx);
+		assert(badGravRes[0].binary.data._buf.length > 0, 'Watermark must fall back to southeast on invalid gravity');
+		ok('[HIGH-02] Invalid Sharp blend mode and watermark gravity fall back safely without libvips crash');
+
+		// 10k. Draw line primitive strokeColor support (MED-01)
+		const lineCtx = createMockCtx(
+			{
+				operation: 'draw',
+				dataPropertyName: 'data',
+				primitive: 'line',
+				color: '#ff0000',
+				strokeColor: '#00ff00',
+				strokeWidth: 4,
+				startPositionX: 0,
+				startPositionY: 10,
+				endPositionX: 50,
+				endPositionY: 10,
+				options: { format: 'png' },
+			},
+			[{ json: {}, binary: { data: { _buf: sampleImg } } }],
+		);
+		const [lineRes] = await node.execute.call(lineCtx);
+		assert(lineRes[0].binary.data._buf.length > 0, 'Draw line should execute with strokeColor');
+		ok('[MED-01] Draw line primitive respects strokeColor');
+
+		// 10l. Concurrent font discovery memoization (HIGH-04)
+		const [fonts1, fonts2] = await Promise.all([
+			node.methods.loadOptions.getFontList.call({}),
+			node.methods.loadOptions.getFontList.call({}),
+		]);
+		assert(Array.isArray(fonts1) && fonts1.length > 0);
+		assert.strictEqual(fonts1, fonts2, 'Concurrent getFontList calls must resolve to the identical memoized array');
+		ok('[HIGH-04] Concurrent getFontList invocations are collapsed into a single memoized Promise');
+	}
+
 	console.log(`\n🎉 All ${passed} test suites passed!\n`);
 }
 

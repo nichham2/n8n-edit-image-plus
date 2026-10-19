@@ -29,6 +29,7 @@ const execFileAsync = promisify(execFile);
  * in the n8n UI does not repeatedly spawn subprocesses.
  */
 let cachedFontList: INodePropertyOptions[] | null = null;
+let fontListPromise: Promise<INodePropertyOptions[]> | null = null;
 
 export class EditImagePlus implements INodeType {
 	methods = {
@@ -37,43 +38,51 @@ export class EditImagePlus implements INodeType {
 				if (cachedFontList) {
 					return cachedFontList;
 				}
+				if (fontListPromise) {
+					return fontListPromise;
+				}
 
-				const families = new Set<string>();
+				fontListPromise = (async () => {
+					const families = new Set<string>();
 
-				try {
-					const { stdout } = await execFileAsync('fc-list', ['--format=%{family}\\n'], {
-						timeout: 5000,
-					});
-					for (const line of stdout.split('\n')) {
-						for (const part of line.split(',')) {
-							const name = part.trim().replace(/^["']|["']$/g, '');
-							if (name && name.length > 1) {
-								families.add(name);
+					try {
+						const { stdout } = await execFileAsync('fc-list', ['--format=%{family}\\n'], {
+							timeout: 5000,
+							maxBuffer: 10 * 1024 * 1024,
+						});
+						for (const line of stdout.split('\n')) {
+							for (const part of line.split(',')) {
+								const name = part.trim().replace(/^["']|["']$/g, '');
+								if (name && name.length > 1) {
+									families.add(name);
+								}
 							}
 						}
+					} catch {
+						cachedFontList = DEFAULT_FONT_OPTIONS;
+						return cachedFontList;
 					}
-				} catch {
-					cachedFontList = DEFAULT_FONT_OPTIONS;
+
+					if (families.size === 0) {
+						cachedFontList = DEFAULT_FONT_OPTIONS;
+						return cachedFontList;
+					}
+
+					const sorted = [...families].sort((a, b) =>
+						a.toLowerCase().localeCompare(b.toLowerCase()),
+					);
+
+					const options: INodePropertyOptions[] = sorted.map((family) => ({
+						name: family,
+						value: family,
+					}));
+
+					options.push({ name: 'Custom (Type Below)', value: 'custom' });
+					cachedFontList = options;
 					return cachedFontList;
-				}
+				})();
 
-				if (families.size === 0) {
-					cachedFontList = DEFAULT_FONT_OPTIONS;
-					return cachedFontList;
-				}
-
-				const sorted = [...families].sort((a, b) =>
-					a.toLowerCase().localeCompare(b.toLowerCase()),
-				);
-
-				const options: INodePropertyOptions[] = sorted.map((family) => ({
-					name: family,
-					value: family,
-				}));
-
-				options.push({ name: 'Custom (Type Below)', value: 'custom' });
-				cachedFontList = options;
-				return cachedFontList;
+				return fontListPromise;
 			},
 		},
 	};
@@ -202,7 +211,8 @@ export class EditImagePlus implements INodeType {
 						name: 'keepMetadata',
 						type: 'boolean',
 						default: false,
-						description: 'Whether to preserve EXIF metadata and ICC colour profiles in the output image',
+						description:
+							'Whether to preserve EXIF metadata and ICC colour profiles in the output image',
 					},
 					{
 						displayName: 'Output Property Name',
@@ -243,21 +253,29 @@ export class EditImagePlus implements INodeType {
 			const item = items[itemIndex];
 			try {
 				const operation = this.getNodeParameter('operation', itemIndex) as string;
-				const dataPropertyName = this.getNodeParameter(
-					'dataPropertyName',
-					itemIndex,
-					'data',
-				) as string;
+				const rawDataProp = this.getNodeParameter('dataPropertyName', itemIndex, 'data') as string;
+				const dataPropertyName =
+					(typeof rawDataProp === 'string' ? rawDataProp.trim() : '') || 'data';
+				const safeDataProp =
+					dataPropertyName === '__proto__' ||
+					dataPropertyName === 'constructor' ||
+					dataPropertyName === 'prototype'
+						? 'data'
+						: dataPropertyName;
 				const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
 
 				// ── Get information ─────────────────────────────────────────
 				if (operation === 'information') {
-					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
-					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, dataPropertyName);
+					this.helpers.assertBinaryData(itemIndex, safeDataProp);
+					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, safeDataProp);
 					const infoSharp = createSafeSharp(buf);
 					const meta = await assertSafeInputMetadata(infoSharp, 'Get Information operation');
 					returnData.push({
-						json: formatSafeMetadata(meta) as IDataObject,
+						json: {
+							...deepCopy(item.json),
+							...(formatSafeMetadata(meta) as IDataObject),
+						},
+						binary: item.binary ? deepCopy(item.binary) : {},
 						pairedItem: { item: itemIndex },
 					});
 					continue;
@@ -282,8 +300,16 @@ export class EditImagePlus implements INodeType {
 					operations = [{ operation, ...singleOp }];
 				}
 
-				const outputPropertyName =
-					((options.outputPropertyName as string) || '').trim() || dataPropertyName;
+				let outputPropertyName =
+					((options.outputPropertyName as string) || '').trim() || safeDataProp;
+				if (
+					outputPropertyName === '__proto__' ||
+					outputPropertyName === 'constructor' ||
+					outputPropertyName === 'prototype' ||
+					!outputPropertyName
+				) {
+					outputPropertyName = safeDataProp;
+				}
 				const keepMetadata = options.keepMetadata === true;
 
 				// ── Initialize base Sharp pipeline ──────────────────────────
@@ -295,15 +321,15 @@ export class EditImagePlus implements INodeType {
 				} else if (firstOp === 'template') {
 					sharpInstance = await buildTemplateInstance(operations[0]);
 				} else {
-					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
-					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, dataPropertyName);
+					this.helpers.assertBinaryData(itemIndex, safeDataProp);
+					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, safeDataProp);
 					sharpInstance = createSafeSharp(buf);
 					const inputMeta = await assertSafeInputMetadata(sharpInstance, 'Input image');
 					if (inputMeta.orientation !== undefined && inputMeta.orientation > 1) {
 						const orientedPipe = keepMetadata
 							? sharpInstance.rotate().withMetadata({ orientation: 1 })
 							: sharpInstance.rotate();
-						const orientedBuf = await orientedPipe.png().toBuffer();
+						const orientedBuf = await orientedPipe.png({ compressionLevel: 0 }).toBuffer();
 						sharpInstance = createSafeSharp(orientedBuf);
 					}
 				}
@@ -320,7 +346,7 @@ export class EditImagePlus implements INodeType {
 							if (keepMetadata) {
 								sharpInstance = sharpInstance.withMetadata();
 							}
-							const stepBuf = await sharpInstance.png().toBuffer();
+							const stepBuf = await sharpInstance.png({ compressionLevel: 0 }).toBuffer();
 							sharpInstance = createSafeSharp(stepBuf);
 						}
 					} catch (stepError) {
@@ -372,7 +398,12 @@ export class EditImagePlus implements INodeType {
 					pairedItem: { item: itemIndex },
 				};
 
-				const fileName = normalizeOutputFileName(options.fileName, fmt);
+				const inputFileName = item.binary?.[safeDataProp]?.fileName;
+				const targetFileName =
+					typeof options.fileName === 'string' && options.fileName.trim().length > 0
+						? options.fileName.trim()
+						: inputFileName || 'image';
+				const fileName = normalizeOutputFileName(targetFileName, fmt);
 				const binaryData = await this.helpers.prepareBinaryData(outputBuffer, fileName, mimeType);
 				newItem.binary![outputPropertyName] = binaryData;
 
@@ -388,6 +419,9 @@ export class EditImagePlus implements INodeType {
 					});
 					continue;
 				}
+				if (error instanceof NodeOperationError) {
+					throw error;
+				}
 				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 			}
 		}
@@ -395,4 +429,3 @@ export class EditImagePlus implements INodeType {
 		return [returnData];
 	}
 }
-

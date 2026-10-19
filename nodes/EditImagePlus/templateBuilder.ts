@@ -11,10 +11,11 @@ import {
 	wrapText,
 } from './utils';
 
-function parseFontStyle(styleStr: string): string {
+function parseFontStyle(styleStr: unknown): string {
+	const str = typeof styleStr === 'string' ? styleStr : '';
 	let attrs = '';
-	if (styleStr.includes('bold')) attrs += ' font-weight="bold"';
-	if (styleStr.includes('italic')) attrs += ' font-style="italic"';
+	if (str.includes('bold')) attrs += ' font-weight="bold"';
+	if (str.includes('italic')) attrs += ' font-style="italic"';
 	return attrs;
 }
 
@@ -24,8 +25,8 @@ function parseFontStyle(styleStr: string): string {
 export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
 	const templateName = (op.templateName as string) || 'Instagram Post (1:1)';
 	const tpl = IMAGE_TEMPLATES.find((t) => t.name === templateName) ?? IMAGE_TEMPLATES[0];
-	const rawWidth = templateName === 'Custom' ? (op.customWidth ?? 800) : tpl.width;
-	const rawHeight = templateName === 'Custom' ? (op.customHeight ?? 600) : tpl.height;
+	const rawWidth = templateName === 'Custom' ? op.customWidth ?? 800 : tpl.width;
+	const rawHeight = templateName === 'Custom' ? op.customHeight ?? 600 : tpl.height;
 	const { width, height } = validateDimensions(rawWidth, rawHeight, 'Template operation', 800, 600);
 
 	const bgColorHex = sanitizeCssColor(op.templateBgColor, '#1a1a2e');
@@ -156,7 +157,10 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
 		const titleLines = wrapText(rawTitleText, maxTitleChars).split('\n');
 		titleLineCount = titleLines.length;
 		const titleTspans = titleLines
-			.map((l, i) => `<tspan x="${padding}" dy="${i === 0 ? 0 : titleLineHeight}">${escapeSvg(l)}</tspan>`)
+			.map(
+				(l, i) =>
+					`<tspan x="${padding}" dy="${i === 0 ? 0 : titleLineHeight}">${escapeSvg(l)}</tspan>`,
+			)
 			.join('');
 
 		titleSvg = `
@@ -178,7 +182,10 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
 		const maxSubChars = Math.max(15, Math.floor((width - padding * 2) / (subtitleFontSize * 0.55)));
 		const subLines = wrapText(rawSubtitleText, maxSubChars).split('\n');
 		const subTspans = subLines
-			.map((l, i) => `<tspan x="${padding}" dy="${i === 0 ? 0 : subtitleLineHeight}">${escapeSvg(l)}</tspan>`)
+			.map(
+				(l, i) =>
+					`<tspan x="${padding}" dy="${i === 0 ? 0 : subtitleLineHeight}">${escapeSvg(l)}</tspan>`,
+			)
 			.join('');
 
 		subtitleSvg = `
@@ -208,7 +215,10 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
 		accentBarY = startY - qFontSize * 1.5;
 
 		const tspans = lines
-			.map((l, i) => `<tspan x="${width / 2}" dy="${i === 0 ? 0 : qFontSize * 1.5}">${escapeSvg(l)}</tspan>`)
+			.map(
+				(l, i) =>
+					`<tspan x="${width / 2}" dy="${i === 0 ? 0 : qFontSize * 1.5}">${escapeSvg(l)}</tspan>`,
+			)
 			.join('');
 
 		quoteSvg = `
@@ -242,18 +252,22 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
 		const mFontSize = Math.max(30, Math.round(height * 0.1));
 		const memeLineHeight = Math.round(mFontSize * 1.15);
 		const maxMemeChars = Math.max(10, Math.floor((width - padding) / (mFontSize * 0.6)));
-		const defaultMemeStroke = `stroke="#000000" stroke-width="${Math.max(1, Math.round(mFontSize * 0.08))}" stroke-linejoin="round" paint-order="stroke fill"`;
+		const defaultMemeStroke = `stroke="#000000" stroke-width="${Math.max(
+			1,
+			Math.round(mFontSize * 0.08),
+		)}" stroke-linejoin="round" paint-order="stroke fill"`;
 		const memeEffectAttr =
-			textEffect === 'default'
-				? defaultMemeStroke
-				: `${applyFilterAttr} ${applyStrokeAttr}`.trim();
+			textEffect === 'default' ? defaultMemeStroke : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
 
 		// Hide the accent bar off-screen for meme layout
 		accentBarY = -1000;
 		if (rawMemeTop) {
 			const topLines = wrapText(rawMemeTop, maxMemeChars).split('\n');
 			const topTspans = topLines
-				.map((l, i) => `<tspan x="${width / 2}" dy="${i === 0 ? 0 : memeLineHeight}">${escapeSvg(l)}</tspan>`)
+				.map(
+					(l, i) =>
+						`<tspan x="${width / 2}" dy="${i === 0 ? 0 : memeLineHeight}">${escapeSvg(l)}</tspan>`,
+				)
 				.join('');
 			memeSvg += `
 			<text
@@ -271,7 +285,10 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
 				height - mFontSize * 0.35 - (bottomLines.length - 1) * memeLineHeight,
 			);
 			const bottomTspans = bottomLines
-				.map((l, i) => `<tspan x="${width / 2}" dy="${i === 0 ? 0 : memeLineHeight}">${escapeSvg(l)}</tspan>`)
+				.map(
+					(l, i) =>
+						`<tspan x="${width / 2}" dy="${i === 0 ? 0 : memeLineHeight}">${escapeSvg(l)}</tspan>`,
+				)
 				.join('');
 			memeSvg += `
 			<text
@@ -315,16 +332,26 @@ ${customFilterSvg}
   <!-- Subtle gradient overlay -->
   <rect width="${width}" height="${height}" fill="url(#grad)"/>
   <!-- Accent bar -->
-  <rect x="${accentBarX}" y="${accentBarY}" width="${Math.round(width * 0.12)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
+  <rect x="${accentBarX}" y="${accentBarY}" width="${Math.round(
+		width * 0.12,
+	)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
   ${titleSvg}
   ${subtitleSvg}
   ${quoteSvg}
   ${authorSvg}
   ${memeSvg}
   ${quoteWatermarkSvg}
-  <!-- Corner decoration -->
-  <rect x="${width - 60}" y="${height - 60}" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
-  <rect x="${width - 24}" y="${height - 60}" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>
+  ${
+		layout !== 'meme' && width >= 120 && height >= 120
+			? `<!-- Corner decoration -->
+  <rect x="${width - 60}" y="${
+					height - 60
+			  }" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
+  <rect x="${width - 24}" y="${
+					height - 60
+			  }" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>`
+			: ''
+	}
 </svg>`;
 
 	const base = createSafeSharp({
@@ -338,5 +365,3 @@ ${customFilterSvg}
 
 	return base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
 }
-
-

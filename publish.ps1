@@ -14,7 +14,9 @@ param(
 
     [switch]$DryRun,
 
-    [switch]$SkipLogin
+    [switch]$SkipLogin,
+
+    [switch]$PushTag
 )
 
 Set-StrictMode -Version Latest
@@ -49,7 +51,9 @@ if ($LASTEXITCODE -ne 0) { Write-Fail "Node.js is not installed or not in PATH" 
 Write-Success "Environment OK"
 
 # ── 2. npm login ─────────────────────────────────────────────
-if (-not $SkipLogin) {
+if ($DryRun) {
+    Write-Step "Skipping npm login check (Dry Run mode)"
+} elseif (-not $SkipLogin) {
     Write-Step "Logging into npm..."
     Write-Host "  (A browser window or OTP prompt will appear)"
     npm login
@@ -117,15 +121,23 @@ if ($DryRun) {
     Write-Host "  Reverting version bump (dry-run only)..." -ForegroundColor Yellow
     npm version $oldVer --no-git-tag-version | Out-Null
 } else {
-    npm publish --access public
-    if ($LASTEXITCODE -ne 0) { Write-Fail "npm publish failed" }
-
-    # ── 10. Git tag + commit ─────────────────────────────────
+    # ── 9. Git tag + commit ─────────────────────────────────
     Write-Step "Creating git tag v$newVer..."
     git add package.json package-lock.json
     git commit -m "chore: release v$newVer"
     git tag "v$newVer"
     Write-Success "Git tag v$newVer created"
+
+    # ── 10. Publish to npm ──────────────────────────────────
+    Write-Step "Publishing to npm..."
+    npm publish --access public
+    if ($LASTEXITCODE -ne 0) { Write-Fail "npm publish failed" }
+
+    if ($PushTag) {
+        Write-Step "Pushing commit and tags to origin..."
+        git push origin master --tags
+        Write-Success "Pushed to origin"
+    }
 
     Write-Host ""
     Write-Host "╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
@@ -133,6 +145,8 @@ if ($DryRun) {
     Write-Host "╚══════════════════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
     Write-Host "  npm page : https://www.npmjs.com/package/n8n-nodes-edit-image-pro" -ForegroundColor Cyan
-    Write-Host "  Push tags: git push origin master --tags" -ForegroundColor Cyan
+    if (-not $PushTag) {
+        Write-Host "  Push tags: git push origin master --tags" -ForegroundColor Cyan
+    }
     Write-Host ""
 }

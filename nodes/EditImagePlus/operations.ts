@@ -15,6 +15,49 @@ import {
 	wrapText,
 } from './utils';
 
+const VALID_BLEND_MODES = new Set<string>([
+	'clear',
+	'source',
+	'over',
+	'in',
+	'out',
+	'atop',
+	'dest',
+	'dest-over',
+	'dest-in',
+	'dest-out',
+	'dest-atop',
+	'xor',
+	'add',
+	'saturate',
+	'multiply',
+	'screen',
+	'overlay',
+	'darken',
+	'lighten',
+	'color-dodge',
+	'colour-dodge',
+	'color-burn',
+	'colour-burn',
+	'hard-light',
+	'soft-light',
+	'difference',
+	'exclusion',
+]);
+
+const VALID_GRAVITIES = new Set<string>([
+	'north',
+	'northeast',
+	'southeast',
+	'south',
+	'southwest',
+	'west',
+	'northwest',
+	'east',
+	'center',
+	'centre',
+]);
+
 /**
  * Collects parameters for single-step mode using the auto-derived `OPERATION_PARAM_MAP`.
  */
@@ -39,13 +82,7 @@ export function buildSingleOpParams(
  * Creates a blank RGBA Sharp canvas with validated dimensions.
  */
 export function createBlankCanvas(op: IDataObject): sharp.Sharp {
-	const { width, height } = validateDimensions(
-		op.width,
-		op.height,
-		'Create operation',
-		1080,
-		1080,
-	);
+	const { width, height } = validateDimensions(op.width, op.height, 'Create operation', 1080, 1080);
 	const bg = hexToRgba(op.backgroundColor, '#ffffff');
 	return createSafeSharp({
 		create: {
@@ -107,7 +144,7 @@ export async function applyOperation(
 	}
 
 	if (operation === 'composite') {
-		const propName = ((op.dataPropertyNameComposite as string) || 'data2').trim();
+		const propName = ((op.dataPropertyNameComposite as string) || '').trim() || 'data2';
 		ctx.helpers.assertBinaryData(itemIndex, propName);
 		const overlayBuf = await ctx.helpers.getBinaryDataBuffer(itemIndex, propName);
 
@@ -115,8 +152,14 @@ export async function applyOperation(
 		const baseW = baseMeta.width ?? 800;
 		const baseH = baseMeta.height ?? 600;
 
-		const overlaySharp = createSafeSharp(overlayBuf);
-		const overlayMeta = await assertSafeInputMetadata(overlaySharp, 'Composite operation');
+		let overlaySharp = createSafeSharp(overlayBuf);
+		const rawOverlayMeta = await assertSafeInputMetadata(overlaySharp, 'Composite operation');
+		let preparedOverlayBuf = overlayBuf;
+		if (rawOverlayMeta.orientation !== undefined && rawOverlayMeta.orientation > 1) {
+			preparedOverlayBuf = await overlaySharp.rotate().png({ compressionLevel: 0 }).toBuffer();
+			overlaySharp = createSafeSharp(preparedOverlayBuf);
+		}
+		const overlayMeta = await overlaySharp.metadata();
 		const ovW = overlayMeta.width ?? baseW;
 		const ovH = overlayMeta.height ?? baseH;
 
@@ -137,19 +180,22 @@ export async function applyOperation(
 			);
 		}
 
-		let preparedOverlay: Buffer = overlayBuf;
+		let preparedOverlay: Buffer = preparedOverlayBuf;
 		if (srcLeft > 0 || srcTop > 0 || visibleW < ovW || visibleH < ovH) {
-			preparedOverlay = await createSafeSharp(overlayBuf)
+			preparedOverlay = await createSafeSharp(preparedOverlayBuf)
 				.extract({ left: srcLeft, top: srcTop, width: visibleW, height: visibleH })
 				.toBuffer();
 		}
+
+		const rawOperator = typeof op.operator === 'string' ? op.operator.trim().toLowerCase() : 'over';
+		const blendMode = (VALID_BLEND_MODES.has(rawOperator) ? rawOperator : 'over') as sharp.Blend;
 
 		return instance.composite([
 			{
 				input: preparedOverlay,
 				left: dstLeft,
 				top: dstTop,
-				blend: (op.operator as sharp.Blend) || 'over',
+				blend: blendMode,
 			},
 		]);
 	}
@@ -211,7 +257,10 @@ export async function applyOperation(
 		if (primitive === 'rectangle') {
 			const w = Math.abs(x2 - x1);
 			const h = Math.abs(y2 - y1);
-			shapeSvg = `<rect x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${w}" height="${h}" rx="${cr}" ry="${cr}" fill="${fillColor}" ${strokeAttr}/>`;
+			shapeSvg = `<rect x="${Math.min(x1, x2)}" y="${Math.min(
+				y1,
+				y2,
+			)}" width="${w}" height="${h}" rx="${cr}" ry="${cr}" fill="${fillColor}" ${strokeAttr}/>`;
 		} else if (primitive === 'circle') {
 			const cx = (x1 + x2) / 2;
 			const cy = (y1 + y2) / 2;
@@ -219,7 +268,11 @@ export async function applyOperation(
 			const ry = Math.abs(y2 - y1) / 2;
 			shapeSvg = `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${fillColor}" ${strokeAttr}/>`;
 		} else if (primitive === 'line') {
-			shapeSvg = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${fillColor}" stroke-width="${Math.max(1, strokeWidth || 2)}" stroke-linecap="round"/>`;
+			const lineStrokeColor = op.strokeColor ? strokeColor : fillColor;
+			shapeSvg = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${lineStrokeColor}" stroke-width="${Math.max(
+				1,
+				strokeWidth || 2,
+			)}" stroke-linecap="round"/>`;
 		}
 
 		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">${shapeSvg}</svg>`;
@@ -256,7 +309,13 @@ export async function applyOperation(
 			outside: 'outside',
 		};
 		const fit = fitMap[(op.resizeOption as string) ?? 'cover'] ?? 'cover';
-		const { width, height } = validateDimensions(op.width, op.height, 'Resize operation', 1080, 1080);
+		const { width, height } = validateDimensions(
+			op.width,
+			op.height,
+			'Resize operation',
+			1080,
+			1080,
+		);
 		const bg = op.resizeBackground
 			? hexToRgba(op.resizeBackground, '#000000')
 			: { r: 0, g: 0, b: 0, alpha: 1 };
@@ -270,7 +329,7 @@ export async function applyOperation(
 	}
 
 	if (operation === 'rotate') {
-		const bg = hexToRgba(op.backgroundColor, '#00000000');
+		const bg = hexToRgba(op.rotateBackgroundColor ?? op.backgroundColor, '#00000000');
 		const angle = clampNumber(op.rotate, -360, 360, 0);
 		return instance.rotate(angle, {
 			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
@@ -330,10 +389,10 @@ export async function applyOperation(
 
 		const fontSize = clampNumber(op.fontSize, 1, 4000, 48);
 		const fontColor = sanitizeCssColor(op.fontColor, '#ffffff');
-		const rawStyle = (op.fontStyle as string) ?? 'normal';
+		const rawStyle = typeof op.fontStyle === 'string' ? op.fontStyle : '';
+		const rawWeight = typeof op.fontWeight === 'string' ? op.fontWeight : '';
 		// Preserve backwards compatibility with legacy saved workflows using `fontWeight`
-		const fontWeight =
-			rawStyle.includes('bold') || (op.fontWeight as string) === 'bold' ? 'bold' : 'normal';
+		const fontWeight = rawStyle.includes('bold') || rawWeight === 'bold' ? 'bold' : 'normal';
 		const fontStyle = rawStyle.includes('italic') ? 'italic' : 'normal';
 
 		const rawFamily = (op.fontFamily as string) ?? 'Arial';
@@ -360,7 +419,10 @@ export async function applyOperation(
 
 		const startY = Math.round(posY - ((lines.length - 1) * lineHeight) / 2);
 		const tspans = lines
-			.map((line, i) => `<tspan x="${posX}" dy="${i === 0 ? 0 : lineHeight}">${escapeSvg(line)}</tspan>`)
+			.map(
+				(line, i) =>
+					`<tspan x="${posX}" dy="${i === 0 ? 0 : lineHeight}">${escapeSvg(line)}</tspan>`,
+			)
 			.join('');
 
 		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">
@@ -411,7 +473,7 @@ export async function applyOperation(
 	}
 
 	if (operation === 'watermark') {
-		const wmProp = ((op.watermarkProperty as string) || 'watermark').trim();
+		const wmProp = ((op.watermarkProperty as string) || '').trim() || 'watermark';
 		ctx.helpers.assertBinaryData(itemIndex, wmProp);
 		const wmBuf = await ctx.helpers.getBinaryDataBuffer(itemIndex, wmProp);
 
@@ -420,14 +482,22 @@ export async function applyOperation(
 		const imgH = meta.height ?? 600;
 		const scalePercent = clampNumber(op.watermarkScale, 1, 100, 20);
 		const opacity = clampNumber(op.watermarkOpacity, 0, 100, 50) / 100;
-		const gravity = (op.watermarkGravity as string) ?? 'southeast';
+		const rawGravity =
+			typeof op.watermarkGravity === 'string'
+				? op.watermarkGravity.trim().toLowerCase()
+				: 'southeast';
+		const gravity = (VALID_GRAVITIES.has(rawGravity) ? rawGravity : 'southeast') as sharp.Gravity;
 
 		const maxDim = Math.max(1, Math.round(Math.max(imgW, imgH) * (scalePercent / 100)));
 		const targetW = Math.max(1, Math.min(imgW, maxDim));
 		const targetH = Math.max(1, Math.min(imgH, maxDim));
 
-		const wmSharp = createSafeSharp(wmBuf);
-		await assertSafeInputMetadata(wmSharp, 'Watermark operation');
+		let wmSharp = createSafeSharp(wmBuf);
+		const wmInputMeta = await assertSafeInputMetadata(wmSharp, 'Watermark operation');
+		if (wmInputMeta.orientation !== undefined && wmInputMeta.orientation > 1) {
+			const rotatedWmBuf = await wmSharp.rotate().png({ compressionLevel: 0 }).toBuffer();
+			wmSharp = createSafeSharp(rotatedWmBuf);
+		}
 
 		const { data: wmRaw, info: wmInfo } = await wmSharp
 			.resize(targetW, targetH, { fit: 'inside', withoutEnlargement: true })
@@ -458,4 +528,3 @@ export async function applyOperation(
 
 	return instance;
 }
-
