@@ -79,6 +79,14 @@ npm run build
 if ($LASTEXITCODE -ne 0) { Write-Fail "Build failed — fix TypeScript errors above" }
 Write-Success "Build succeeded"
 
+# ── 5b. Lint & Test ─────────────────────────────────────────
+Write-Step "Running linter & test suite..."
+npm run lint
+if ($LASTEXITCODE -ne 0) { Write-Fail "Lint failed — fix lint errors above" }
+npm test
+if ($LASTEXITCODE -ne 0) { Write-Fail "Tests failed — fix failing tests above" }
+Write-Success "Lint & tests passed"
+
 # ── 6. Verify dist contents ──────────────────────────────────
 Write-Step "Verifying dist output..."
 $nodeJs = "dist/nodes/EditImagePlus/EditImagePlus.node.js"

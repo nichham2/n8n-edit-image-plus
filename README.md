@@ -11,6 +11,8 @@
 
 Create stunning social media graphics, YouTube thumbnails, quote images, memes, and branded content — all directly inside your n8n workflows.
 
+![Edit Image+ Sample Output](./print-sample.png)
+
 ---
 
 ## ✨ Features at a Glance

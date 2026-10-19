@@ -1,13 +1,13 @@
 # Source files — never needed at runtime
 nodes/
 credentials/
+test/
 *.ts
 !*.d.ts
 tsconfig.json
 tsconfig.tsbuildinfo
 gulpfile.js
 .eslintrc.js
-.eslintrc.prepublish.js
 .prettierrc.js
 .editorconfig
 .vscode/

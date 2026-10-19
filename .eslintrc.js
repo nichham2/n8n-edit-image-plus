@@ -25,6 +25,9 @@ module.exports = {
 			files: ['package.json'],
 			plugins: ['eslint-plugin-n8n-nodes-base'],
 			extends: ['plugin:n8n-nodes-base/community'],
+			parserOptions: {
+				project: null,
+			},
 			rules: {
 				'n8n-nodes-base/community-package-json-name-still-default': 'off',
 			},
@@ -46,6 +49,8 @@ module.exports = {
 				'n8n-nodes-base/node-execute-block-missing-continue-on-fail': 'off',
 				'n8n-nodes-base/node-resource-description-filename-against-convention': 'off',
 				'n8n-nodes-base/node-param-fixed-collection-type-unsorted-items': 'off',
+				'n8n-nodes-base/node-param-display-name-wrong-for-dynamic-options': 'off',
+				'n8n-nodes-base/node-param-description-wrong-for-dynamic-options': 'off',
 			},
 		},
 	],

@@ -1,1219 +1,65 @@
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type {
 	IDataObject,
 	IExecuteFunctions,
 	ILoadOptionsFunctions,
 	INodeExecutionData,
-	INodeProperties,
 	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeOperationError, deepCopy } from 'n8n-workflow';
-import sharp from 'sharp';
+import type sharp from 'sharp';
+import { DEFAULT_FONT_OPTIONS, nodeOperations } from './constants';
+import { applyOperation, buildSingleOpParams, createBlankCanvas } from './operations';
+import { nodeOperationOptions } from './properties';
+import { buildTemplateInstance } from './templateBuilder';
+import {
+	assertSafeInputMetadata,
+	createSafeSharp,
+	formatSafeMetadata,
+	normalizeOutputFileName,
+} from './utils';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Converts a CSS-style hex colour (#RRGGBB or #RRGGBBAA) to a sharp RGBA object.
- */
-function hexToRgba(hex: string): { r: number; g: number; b: number; alpha: number } {
-	const clean = hex.replace('#', '');
-	const r = parseInt(clean.substring(0, 2), 16) || 0;
-	const g = parseInt(clean.substring(2, 4), 16) || 0;
-	const b = parseInt(clean.substring(4, 6), 16) || 0;
-	const alpha = clean.length === 8 ? (parseInt(clean.substring(6, 8), 16) || 255) / 255 : 1;
-	return { r, g, b, alpha };
-}
+const execFileAsync = promisify(execFile);
 
 /**
- * Word-wraps text to a maximum number of characters per line.
+ * Module-scoped cache for `fc-list` font discovery so opening multiple font dropdowns
+ * in the n8n UI does not repeatedly spawn subprocesses.
  */
-function wrapText(text: string, maxLineLength: number): string {
-	const lines: string[] = [];
-	for (const paragraph of text.split('\n')) {
-		let current = '';
-		for (const word of paragraph.split(' ')) {
-			if (current.length + word.length + 1 > maxLineLength && current.length > 0) {
-				lines.push(current.trimEnd());
-				current = word + ' ';
-			} else {
-				current += word + ' ';
-			}
-		}
-		lines.push(current.trimEnd());
-	}
-	return lines.join('\n');
-}
-
-/**
- * Escapes characters that would break inline SVG.
- */
-function escapeSvg(str: string): string {
-	return str
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&apos;');
-}
-
-// ---------------------------------------------------------------------------
-// Templates definition
-// ---------------------------------------------------------------------------
-
-interface ImageTemplate {
-	name: string;
-	width: number;
-	height: number;
-	description: string;
-}
-
-const IMAGE_TEMPLATES: ImageTemplate[] = [
-	{ name: 'Instagram Post (1:1)', width: 1080, height: 1080, description: 'Instagram square post' },
-	{ name: 'Instagram Story (9:16)', width: 1080, height: 1920, description: 'Instagram/TikTok story' },
-	{ name: 'Instagram Portrait (4:5)', width: 1080, height: 1350, description: 'Instagram portrait' },
-	{ name: 'Twitter/X Post (16:9)', width: 1200, height: 675, description: 'Twitter card image' },
-	{ name: 'YouTube Thumbnail', width: 1280, height: 720, description: 'YouTube video thumbnail' },
-	{ name: 'Facebook Post', width: 1200, height: 630, description: 'Facebook link preview' },
-	{ name: 'LinkedIn Banner', width: 1584, height: 396, description: 'LinkedIn profile banner' },
-	{ name: 'LinkedIn Post', width: 1200, height: 627, description: 'LinkedIn post image' },
-	{ name: 'Pinterest Pin', width: 1000, height: 1500, description: 'Pinterest tall pin' },
-	{ name: 'Open Graph (OG)', width: 1200, height: 630, description: 'General Open Graph image' },
-	{ name: 'Email Header', width: 600, height: 200, description: 'Email header banner' },
-	{ name: 'Presentation Slide (16:9)', width: 1920, height: 1080, description: 'Full-HD slide' },
-	{ name: 'Business Card', width: 1050, height: 600, description: 'Standard business card' },
-	{ name: 'A4 Document', width: 2480, height: 3508, description: 'A4 at 300 DPI' },
-	{ name: 'Custom', width: 800, height: 600, description: 'Enter your own dimensions' },
-];
-
-// ---------------------------------------------------------------------------
-// Operations options list
-// ---------------------------------------------------------------------------
-
-const nodeOperations: INodePropertyOptions[] = [
-	{ name: 'Blur', value: 'blur', description: 'Apply Gaussian blur to the image', action: 'Blur image' },
-	{ name: 'Border', value: 'border', description: 'Add a solid-colour border', action: 'Add border' },
-	{ name: 'Composite', value: 'composite', description: 'Overlay one image on top of another', action: 'Composite image' },
-	{ name: 'Create', value: 'create', description: 'Generate a blank canvas', action: 'Create image' },
-	{ name: 'Crop', value: 'crop', description: 'Extract a region from the image', action: 'Crop image' },
-	{ name: 'Draw', value: 'draw', description: 'Draw shapes (rectangle, circle, line)', action: 'Draw on image' },
-	{ name: 'Flip', value: 'flip', description: 'Flip the image vertically (top ↔ bottom)', action: 'Flip image' },
-	{ name: 'Flop', value: 'flop', description: 'Flop the image horizontally (left ↔ right)', action: 'Flop image' },
-	{ name: 'Gamma', value: 'gamma', description: 'Apply gamma correction', action: 'Apply gamma' },
-	{ name: 'Grayscale', value: 'grayscale', description: 'Convert image to grayscale', action: 'Convert to grayscale' },
-	{ name: 'Normalize', value: 'normalize', description: 'Stretch contrast to full dynamic range', action: 'Normalize image' },
-	{ name: 'Rotate', value: 'rotate', description: 'Rotate the image by an angle', action: 'Rotate image' },
-	{ name: 'Resize', value: 'resize', description: 'Change image dimensions', action: 'Resize image' },
-	{ name: 'Sepia', value: 'sepia', description: 'Apply a warm sepia tone', action: 'Apply sepia tone' },
-	{ name: 'Sharpen', value: 'sharpen', description: 'Increase image sharpness', action: 'Sharpen image' },
-	{ name: 'Shear', value: 'shear', description: 'Shear the image along X or Y axis', action: 'Shear image' },
-	{ name: 'Template', value: 'template', description: 'Create from a preset canvas template', action: 'Create from template' },
-	{ name: 'Text', value: 'text', description: 'Render text onto the image', action: 'Add text' },
-	{ name: 'Tint', value: 'tint', description: 'Apply a colour tint', action: 'Tint image' },
-	{ name: 'Transparent', value: 'transparent', description: 'Make the image background transparent (PNG)', action: 'Make transparent' },
-	{ name: 'Watermark', value: 'watermark', description: 'Overlay a watermark image with configurable opacity', action: 'Add watermark' },
-];
-
-// ---------------------------------------------------------------------------
-// Per-operation parameter definitions
-// ---------------------------------------------------------------------------
-
-
-/**
- * Extracts the primary font-family name from a raw value.
- * Handles legacy CSS stacks like `"Playfair Display", serif` as well as plain names like `Arial`.
- */
-function normalizeFontFamily(raw: string): string {
-	if (!raw || raw === 'custom') return raw;
-	// Strip outer CSS quotes and take only the first family in a comma-separated stack
-	return raw.split(',')[0].trim().replace(/^["']|["']$/g, '');
-}
-
-/**
- * Returns a font-family value safe for use inside a double-quoted SVG/CSS attribute.
- * NOTE: librsvg has a known bug where it fails to parse font-family strings containing 
- * single or double quotes. Therefore, we always return the unquoted name even if it has spaces.
- */
-function toSvgFontFamily(raw: string): string {
-	return normalizeFontFamily(raw);
-}
-
-
-const fontStyleOptions = [
-	{ name: 'Normal', value: 'normal' },
-	{ name: 'Bold', value: 'bold' },
-	{ name: 'Italic', value: 'italic' },
-	{ name: 'Bold Italic', value: 'bold italic' },
-];
-
-const nodeOperationOptions: INodeProperties[] = [
-	// ────────────────────────────────────────────────────────────────────────
-	// create
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Background Color',
-		name: 'backgroundColor',
-		type: 'color',
-		default: '#ffffff',
-		typeOptions: { showAlpha: true },
-		displayOptions: { show: { operation: ['create'] } },
-		description: 'Background colour of the new image',
-	},
-	{
-		displayName: 'Image Width',
-		name: 'width',
-		type: 'number',
-		default: 1080,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['create'] } },
-		description: 'Width of the new image in pixels',
-	},
-	{
-		displayName: 'Image Height',
-		name: 'height',
-		type: 'number',
-		default: 1080,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['create'] } },
-		description: 'Height of the new image in pixels',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// template
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Template',
-		name: 'templateName',
-		type: 'options',
-		default: 'Instagram Post (1:1)',
-		displayOptions: { show: { operation: ['template'] } },
-		options: IMAGE_TEMPLATES.map((t) => ({
-			name: `${t.name} (${t.width}×${t.height})`,
-			value: t.name,
-			description: t.description,
-		})),
-		description: 'Choose a preset canvas size',
-	},
-	{
-		displayName: 'Custom Width',
-		name: 'customWidth',
-		type: 'number',
-		default: 800,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['template'], templateName: ['Custom'] } },
-		description: 'Custom canvas width in pixels',
-	},
-	{
-		displayName: 'Custom Height',
-		name: 'customHeight',
-		type: 'number',
-		default: 600,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['template'], templateName: ['Custom'] } },
-		description: 'Custom canvas height in pixels',
-	},
-	{
-		displayName: 'Background Color',
-		name: 'templateBgColor',
-		type: 'color',
-		default: '#1a1a2e',
-		typeOptions: { showAlpha: false },
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'Background fill colour for the template canvas',
-	},
-	{
-		displayName: 'Gradient Overlay Color',
-		name: 'templateGradientColor',
-		type: 'color',
-		default: '#e94560',
-		typeOptions: { showAlpha: false },
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'Color of the subtle gradient overlay on the background',
-	},
-	{
-		displayName: 'Layout Type',
-		name: 'templateLayout',
-		type: 'options',
-		options: [
-			{ name: 'Standard (Title & Subtitle)', value: 'standard' },
-			{ name: 'Quote', value: 'quote' },
-			{ name: 'Meme (Top & Bottom Text)', value: 'meme' },
-		],
-		default: 'standard',
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'The layout of the text on the canvas',
-	},
-	{
-		displayName: 'Title Text',
-		name: 'templateTitle',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. My Brand',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
-		description: 'Primary headline text (leave blank to skip)',
-	},
-	{
-		displayName: 'Title Font',
-		name: 'templateTitleFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Arial, sans-serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
-		description: 'Font family for the title (Note: Custom fonts must be installed on your n8n OS)',
-	},
-	{
-		displayName: 'Title Font (Custom)',
-		name: 'templateTitleFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'], templateTitleFont: ['custom'] } },
-		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
-	},
-	{
-		displayName: 'Title Font Style',
-		name: 'templateTitleFontStyle',
-		type: 'options',
-		options: fontStyleOptions,
-		default: 'bold',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
-		description: 'Font style for the title',
-	},
-	{
-		displayName: 'Title Color',
-		name: 'templateTitleColor',
-		type: 'color',
-		default: '#ffffff',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard', 'quote', 'meme'] } },
-		description: 'Primary text colour',
-	},
-	{
-		displayName: 'Subtitle Text',
-		name: 'templateSubtitle',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. Your tagline here',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
-		description: 'Secondary subtitle text (leave blank to skip)',
-	},
-	{
-		displayName: 'Subtitle Font',
-		name: 'templateSubtitleFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Arial, sans-serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
-		description: 'Font family for the subtitle',
-	},
-	{
-		displayName: 'Subtitle Font (Custom)',
-		name: 'templateSubtitleFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'], templateSubtitleFont: ['custom'] } },
-		description: 'Type the exact font-family name (e.g. "Playfair Display", serif)',
-	},
-	{
-		displayName: 'Subtitle Font Style',
-		name: 'templateSubtitleFontStyle',
-		type: 'options',
-		options: fontStyleOptions,
-		default: 'normal',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard'] } },
-		description: 'Font style for the subtitle',
-	},
-	{
-		displayName: 'Subtitle Color',
-		name: 'templateSubtitleColor',
-		type: 'color',
-		default: '#cccccc',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['standard', 'quote'] } },
-		description: 'Secondary text colour',
-	},
-	{
-		displayName: 'Quote Text',
-		name: 'templateQuote',
-		type: 'string',
-		typeOptions: { rows: 4 },
-		default: '',
-		placeholder: 'e.g. "To be or not to be..."',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'A centered quote to display on the template. Wraps automatically.',
-	},
-	{
-		displayName: 'Quote Font',
-		name: 'templateQuoteFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Georgia, serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Font family for the quote',
-	},
-	{
-		displayName: 'Quote Font (Custom)',
-		name: 'templateQuoteFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], templateQuoteFont: ['custom'] } },
-		description: 'Type the exact font-family name',
-	},
-	{
-		displayName: 'Quote Font Style',
-		name: 'templateQuoteFontStyle',
-		type: 'options',
-		options: fontStyleOptions,
-		default: 'italic',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Font style for the quote',
-	},
-	{
-		displayName: 'Quote Author',
-		name: 'templateQuoteAuthor',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. William Shakespeare',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'The author of the quote, displayed centered at the bottom',
-	},
-	{
-		displayName: 'Quote Author Font',
-		name: 'templateQuoteAuthorFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Arial, sans-serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Font family for the author',
-	},
-	{
-		displayName: 'Quote Author Font (Custom)',
-		name: 'templateQuoteAuthorFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], templateQuoteAuthorFont: ['custom'] } },
-		description: 'Type the exact font-family name',
-	},
-	{
-		displayName: 'Quote Author Font Style',
-		name: 'templateQuoteAuthorFontStyle',
-		type: 'options',
-		options: fontStyleOptions,
-		default: 'normal',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Font style for the quote author',
-	},
-	{
-		displayName: 'Top Text',
-		name: 'templateMemeTop',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. WHEN YOU REALIZE...',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
-		description: 'Text displayed at the top of the meme',
-	},
-	{
-		displayName: 'Top Text Font',
-		name: 'templateMemeTopFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Impact, sans-serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
-		description: 'Font family for the top text',
-	},
-	{
-		displayName: 'Top Text Font (Custom)',
-		name: 'templateMemeTopFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'], templateMemeTopFont: ['custom'] } },
-		description: 'Type the exact font-family name',
-	},
-	{
-		displayName: 'Top Text Font Style',
-		name: 'templateMemeTopFontStyle',
-		type: 'options',
-		options: fontStyleOptions,
-		default: 'bold',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
-		description: 'Font style for the top text',
-	},
-	{
-		displayName: 'Bottom Text',
-		name: 'templateMemeBottom',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. ITS FRIDAY',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
-		description: 'Text displayed at the bottom of the meme',
-	},
-	{
-		displayName: 'Bottom Text Font',
-		name: 'templateMemeBottomFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Impact, sans-serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
-		description: 'Font family for the bottom text',
-	},
-	{
-		displayName: 'Bottom Text Font (Custom)',
-		name: 'templateMemeBottomFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'], templateMemeBottomFont: ['custom'] } },
-		description: 'Type the exact font-family name',
-	},
-	{
-		displayName: 'Bottom Text Font Style',
-		name: 'templateMemeBottomFontStyle',
-		type: 'options',
-		options: fontStyleOptions,
-		default: 'bold',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['meme'] } },
-		description: 'Font style for the bottom text',
-	},
-	{
-		displayName: 'Accent Color',
-		name: 'templateAccentColor',
-		type: 'color',
-		default: '#e94560',
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'Accent bar / decorative element colour',
-	},
-
-	// -- Global Text Effects --
-	{
-		displayName: 'Global Text Effect',
-		name: 'templateTextEffect',
-		type: 'options',
-		options: [
-			{ name: 'Default (Subtle Shadow for Standard, Outline for Meme)', value: 'default' },
-			{ name: 'None', value: 'none' },
-			{ name: 'Drop Shadow', value: 'shadow' },
-			{ name: 'Glow', value: 'glow' },
-			{ name: 'Outline', value: 'outline' },
-		],
-		default: 'default',
-		displayOptions: { show: { operation: ['template'] } },
-		description: 'Apply an effect to all main text elements on the canvas',
-	},
-	{
-		displayName: 'Effect Color',
-		name: 'templateEffectColor',
-		type: 'color',
-		default: '#000000',
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow', 'outline'] } },
-	},
-	{
-		displayName: 'Effect Opacity (%)',
-		name: 'templateEffectOpacity',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 100 },
-		default: 50,
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow'] } },
-	},
-	{
-		displayName: 'Shadow/Glow Blur Size',
-		name: 'templateEffectBlur',
-		type: 'number',
-		default: 4,
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow', 'glow'] } },
-	},
-	{
-		displayName: 'Shadow Offset X',
-		name: 'templateEffectOffsetX',
-		type: 'number',
-		default: 2,
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow'] } },
-	},
-	{
-		displayName: 'Shadow Offset Y',
-		name: 'templateEffectOffsetY',
-		type: 'number',
-		default: 2,
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['shadow'] } },
-	},
-	{
-		displayName: 'Outline Width',
-		name: 'templateEffectOutlineWidth',
-		type: 'number',
-		default: 2,
-		displayOptions: { show: { operation: ['template'], templateTextEffect: ['outline'] } },
-	},
-
-	// -- Watermark (Quote Layout) --
-	{
-		displayName: 'Watermark Text',
-		name: 'quoteWatermarkText',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. @yourhandle',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Optional watermark text (leave blank to skip)',
-	},
-	{
-		displayName: 'Watermark Font',
-		name: 'quoteWatermarkFont',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Arial, sans-serif',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Font family for the watermark',
-	},
-	{
-		displayName: 'Watermark Font (Custom)',
-		name: 'quoteWatermarkFontCustom',
-		type: 'string',
-		default: '',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'], quoteWatermarkFont: ['custom'] } },
-		description: 'Type the exact font-family name',
-	},
-	{
-		displayName: 'Watermark Color',
-		name: 'quoteWatermarkColor',
-		type: 'color',
-		default: '#ffffff',
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-	},
-	{
-		displayName: 'Watermark Opacity (%)',
-		name: 'quoteWatermarkOpacity',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 100 },
-		default: 30,
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-	},
-	{
-		displayName: 'Watermark X Position (%)',
-		name: 'quoteWatermarkX',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 100 },
-		default: 50,
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Horizontal position from 0 (left) to 100 (right)',
-	},
-	{
-		displayName: 'Watermark Y Position (%)',
-		name: 'quoteWatermarkY',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 100 },
-		default: 95,
-		displayOptions: { show: { operation: ['template'], templateLayout: ['quote'] } },
-		description: 'Vertical position from 0 (top) to 100 (bottom)',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// draw
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Primitive',
-		name: 'primitive',
-		type: 'options',
-		displayOptions: { show: { operation: ['draw'] } },
-		options: [
-			{ name: 'Circle', value: 'circle' },
-			{ name: 'Line', value: 'line' },
-			{ name: 'Rectangle', value: 'rectangle' },
-		],
-		default: 'rectangle',
-		description: 'Shape to draw',
-	},
-	{
-		displayName: 'Color',
-		name: 'color',
-		type: 'color',
-		default: '#ff0000',
-		typeOptions: { showAlpha: true },
-		displayOptions: { show: { operation: ['draw'] } },
-		description: 'Fill colour of the shape',
-	},
-	{
-		displayName: 'Stroke Color',
-		name: 'strokeColor',
-		type: 'color',
-		default: '#000000',
-		typeOptions: { showAlpha: true },
-		displayOptions: { show: { operation: ['draw'] } },
-		description: 'Outline stroke colour (set alpha to 0 for no stroke)',
-	},
-	{
-		displayName: 'Stroke Width',
-		name: 'strokeWidth',
-		type: 'number',
-		default: 0,
-		typeOptions: { minValue: 0 },
-		displayOptions: { show: { operation: ['draw'] } },
-		description: 'Width of the stroke outline in pixels (0 = no stroke)',
-	},
-	{
-		displayName: 'Start Position X',
-		name: 'startPositionX',
-		type: 'number',
-		default: 50,
-		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
-		description: 'X start position of the shape',
-	},
-	{
-		displayName: 'Start Position Y',
-		name: 'startPositionY',
-		type: 'number',
-		default: 50,
-		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
-		description: 'Y start position of the shape',
-	},
-	{
-		displayName: 'End Position X',
-		name: 'endPositionX',
-		type: 'number',
-		default: 250,
-		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
-		description: 'X end position of the shape',
-	},
-	{
-		displayName: 'End Position Y',
-		name: 'endPositionY',
-		type: 'number',
-		default: 250,
-		displayOptions: { show: { operation: ['draw'], primitive: ['circle', 'line', 'rectangle'] } },
-		description: 'Y end position of the shape',
-	},
-	{
-		displayName: 'Corner Radius',
-		name: 'cornerRadius',
-		type: 'number',
-		default: 0,
-		typeOptions: { minValue: 0 },
-		displayOptions: { show: { operation: ['draw'], primitive: ['rectangle'] } },
-		description: 'Radius for rounded rectangle corners',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// text
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Text',
-		name: 'text',
-		type: 'string',
-		typeOptions: { rows: 4 },
-		default: '',
-		placeholder: 'Text to render',
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Text content to add to the image',
-	},
-	{
-		displayName: 'Font Size',
-		name: 'fontSize',
-		type: 'number',
-		default: 48,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Font size in pixels',
-	},
-	{
-		displayName: 'Font Family',
-		name: 'fontFamily',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getFontList' },
-		default: 'Arial, sans-serif',
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Font family to use. The font must be installed on your n8n server.',
-	},
-	{
-		displayName: 'Font Family (Custom)',
-		name: 'fontFamilyCustom',
-		type: 'string',
-		default: '',
-		placeholder: 'e.g. Montserrat, sans-serif',
-		displayOptions: { show: { operation: ['text'], fontFamily: ['custom'] } },
-		description: 'Type the exact font-family CSS value (e.g. "Playfair Display", serif)',
-	},
-	{
-		displayName: 'Font Color',
-		name: 'fontColor',
-		type: 'color',
-		default: '#ffffff',
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Text colour',
-	},
-	{
-		displayName: 'Font Style',
-		name: 'fontStyle',
-		type: 'options',
-		default: 'normal',
-		displayOptions: { show: { operation: ['text'] } },
-		options: [
-			{ name: 'Normal', value: 'normal' },
-			{ name: 'Bold', value: 'bold' },
-			{ name: 'Italic', value: 'italic' },
-			{ name: 'Bold Italic', value: 'bold italic' },
-		],
-		description: 'Font style',
-	},
-	{
-		displayName: 'Text Align',
-		name: 'textAlign',
-		type: 'options',
-		default: 'center',
-		displayOptions: { show: { operation: ['text'] } },
-		options: [
-			{ name: 'Left', value: 'start' },
-			{ name: 'Center', value: 'middle' },
-			{ name: 'Right', value: 'end' },
-		],
-		description: 'Horizontal text alignment',
-	},
-	{
-		displayName: 'Position X',
-		name: 'positionX',
-		type: 'number',
-		default: 540,
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'X coordinate of the text anchor point',
-	},
-	{
-		displayName: 'Position Y',
-		name: 'positionY',
-		type: 'number',
-		default: 540,
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Y coordinate of the text anchor point (baseline)',
-	},
-	{
-		displayName: 'Line Height',
-		name: 'lineHeight',
-		type: 'number',
-		default: 1.4,
-		typeOptions: { minValue: 0.5, maxValue: 5, numberPrecision: 1 },
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Line height multiplier (e.g. 1.4 = 140% of font size)',
-	},
-	{
-		displayName: 'Max Line Length (chars)',
-		name: 'lineLength',
-		type: 'number',
-		typeOptions: { minValue: 1 },
-		default: 40,
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Maximum characters per line before wrapping',
-	},
-	{
-		displayName: 'Text Shadow',
-		name: 'textShadow',
-		type: 'boolean',
-		default: false,
-		displayOptions: { show: { operation: ['text'] } },
-		description: 'Whether to add a drop shadow behind the text',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// blur
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Sigma',
-		name: 'sigma',
-		type: 'number',
-		typeOptions: { minValue: 0.3, maxValue: 1000, numberPrecision: 1 },
-		default: 3,
-		displayOptions: { show: { operation: ['blur'] } },
-		description: 'Blur radius (sigma). Higher = more blur.',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// border
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Border Width',
-		name: 'borderWidth',
-		type: 'number',
-		default: 20,
-		typeOptions: { minValue: 0 },
-		displayOptions: { show: { operation: ['border'] } },
-		description: 'Left and right border width in pixels',
-	},
-	{
-		displayName: 'Border Height',
-		name: 'borderHeight',
-		type: 'number',
-		default: 20,
-		typeOptions: { minValue: 0 },
-		displayOptions: { show: { operation: ['border'] } },
-		description: 'Top and bottom border height in pixels',
-	},
-	{
-		displayName: 'Border Color',
-		name: 'borderColor',
-		type: 'color',
-		default: '#000000',
-		displayOptions: { show: { operation: ['border'] } },
-		description: 'Colour of the border',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// composite
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Composite Image Property',
-		name: 'dataPropertyNameComposite',
-		type: 'string',
-		default: 'data2',
-		placeholder: 'data2',
-		displayOptions: { show: { operation: ['composite'] } },
-		description: 'Binary property name that contains the image to overlay',
-	},
-	{
-		displayName: 'Blend Mode',
-		name: 'operator',
-		type: 'options',
-		displayOptions: { show: { operation: ['composite'] } },
-		options: [
-			{ name: 'Clear', value: 'clear' },
-			{ name: 'Source', value: 'source' },
-			{ name: 'Over (Normal)', value: 'over' },
-			{ name: 'In', value: 'in' },
-			{ name: 'Out', value: 'out' },
-			{ name: 'Atop', value: 'atop' },
-			{ name: 'Destination Over', value: 'dest-over' },
-			{ name: 'Destination In', value: 'dest-in' },
-			{ name: 'Destination Out', value: 'dest-out' },
-			{ name: 'Destination Atop', value: 'dest-atop' },
-			{ name: 'Xor', value: 'xor' },
-			{ name: 'Add', value: 'add' },
-			{ name: 'Saturate', value: 'saturate' },
-			{ name: 'Multiply', value: 'multiply' },
-			{ name: 'Screen', value: 'screen' },
-			{ name: 'Overlay', value: 'overlay' },
-			{ name: 'Darken', value: 'darken' },
-			{ name: 'Lighten', value: 'lighten' },
-			{ name: 'Colour Dodge', value: 'colour-dodge' },
-			{ name: 'Colour Burn', value: 'colour-burn' },
-			{ name: 'Hard Light', value: 'hard-light' },
-			{ name: 'Soft Light', value: 'soft-light' },
-			{ name: 'Difference', value: 'difference' },
-			{ name: 'Exclusion', value: 'exclusion' },
-		],
-		default: 'over',
-		description: 'Blending mode for compositing',
-	},
-	{
-		displayName: 'Position X',
-		name: 'positionX',
-		type: 'number',
-		default: 0,
-		displayOptions: { show: { operation: ['composite'] } },
-		description: 'X offset of the overlay image (pixels from left)',
-	},
-	{
-		displayName: 'Position Y',
-		name: 'positionY',
-		type: 'number',
-		default: 0,
-		displayOptions: { show: { operation: ['composite'] } },
-		description: 'Y offset of the overlay image (pixels from top)',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// crop
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Width',
-		name: 'width',
-		type: 'number',
-		default: 500,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['crop'] } },
-		description: 'Width of the crop region',
-	},
-	{
-		displayName: 'Height',
-		name: 'height',
-		type: 'number',
-		default: 500,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['crop'] } },
-		description: 'Height of the crop region',
-	},
-	{
-		displayName: 'Position X',
-		name: 'positionX',
-		type: 'number',
-		default: 0,
-		typeOptions: { minValue: 0 },
-		displayOptions: { show: { operation: ['crop'] } },
-		description: 'X coordinate (from left) of the crop start',
-	},
-	{
-		displayName: 'Position Y',
-		name: 'positionY',
-		type: 'number',
-		default: 0,
-		typeOptions: { minValue: 0 },
-		displayOptions: { show: { operation: ['crop'] } },
-		description: 'Y coordinate (from top) of the crop start',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// resize
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Width',
-		name: 'width',
-		type: 'number',
-		default: 1080,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['resize'] } },
-		description: 'Target width in pixels',
-	},
-	{
-		displayName: 'Height',
-		name: 'height',
-		type: 'number',
-		default: 1080,
-		typeOptions: { minValue: 1 },
-		displayOptions: { show: { operation: ['resize'] } },
-		description: 'Target height in pixels',
-	},
-	{
-		displayName: 'Fit',
-		name: 'resizeOption',
-		type: 'options',
-		options: [
-			{ name: 'Cover (Crop to Fill)', value: 'cover', description: 'Scales to fill, crops excess' },
-			{ name: 'Contain (Letterbox)', value: 'contain', description: 'Scales to fit, adds padding' },
-			{ name: 'Fill (Ignore Aspect Ratio)', value: 'fill', description: 'Stretches to exact dimensions' },
-			{ name: 'Inside (Max Area)', value: 'inside', description: 'Scales down only if larger than dimensions' },
-			{ name: 'Outside (Min Area)', value: 'outside', description: 'Scales up only if smaller than dimensions' },
-		],
-		default: 'cover',
-		displayOptions: { show: { operation: ['resize'] } },
-		description: 'How to fit the image into the target dimensions',
-	},
-	{
-		displayName: 'Background Color (for Contain)',
-		name: 'resizeBackground',
-		type: 'color',
-		default: '#000000',
-		typeOptions: { showAlpha: true },
-		displayOptions: { show: { operation: ['resize'], resizeOption: ['contain'] } },
-		description: 'Background fill colour when using "Contain" fit',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// rotate
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Degrees',
-		name: 'rotate',
-		type: 'number',
-		typeOptions: { minValue: -360, maxValue: 360 },
-		default: 90,
-		displayOptions: { show: { operation: ['rotate'] } },
-		description: 'Angle to rotate (positive = clockwise)',
-	},
-	{
-		displayName: 'Background Color',
-		name: 'backgroundColor',
-		type: 'color',
-		default: '#00000000',
-		typeOptions: { showAlpha: true },
-		displayOptions: { show: { operation: ['rotate'] } },
-		description: 'Fill colour for the area revealed by rotation',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// shear
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Shear X (degrees)',
-		name: 'degreesX',
-		type: 'number',
-		typeOptions: { numberPrecision: 1 },
-		default: 0,
-		displayOptions: { show: { operation: ['shear'] } },
-		description: 'Horizontal shear angle in degrees',
-	},
-	{
-		displayName: 'Shear Y (degrees)',
-		name: 'degreesY',
-		type: 'number',
-		typeOptions: { numberPrecision: 1 },
-		default: 10,
-		displayOptions: { show: { operation: ['shear'] } },
-		description: 'Vertical shear angle in degrees',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// transparent (PNG output, trims near-white/black to alpha)
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Background Color to Remove',
-		name: 'transparentColor',
-		type: 'color',
-		default: '#ffffff',
-		displayOptions: { show: { operation: ['transparent'] } },
-		description: 'The background colour to replace with transparency',
-	},
-	{
-		displayName: 'Tolerance',
-		name: 'tolerance',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 255 },
-		default: 30,
-		displayOptions: { show: { operation: ['transparent'] } },
-		description: 'Colour matching tolerance (0 = exact match only, 255 = match everything)',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// sharpen
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Sigma',
-		name: 'sharpenSigma',
-		type: 'number',
-		typeOptions: { minValue: 0.5, maxValue: 5, numberPrecision: 1 },
-		default: 1,
-		displayOptions: { show: { operation: ['sharpen'] } },
-		description: 'Unsharp mask sigma. Higher = wider radius.',
-	},
-	{
-		displayName: 'Flat Area Threshold',
-		name: 'sharpenFlat',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 10000, numberPrecision: 1 },
-		default: 1,
-		displayOptions: { show: { operation: ['sharpen'] } },
-		description: 'Threshold of flat areas (lower = sharpen more of the image)',
-	},
-	{
-		displayName: 'Jagged Area Threshold',
-		name: 'sharpenJagged',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 10000, numberPrecision: 1 },
-		default: 2,
-		displayOptions: { show: { operation: ['sharpen'] } },
-		description: 'Threshold of jagged edges (higher = sharpen edges more aggressively)',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// gamma
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Gamma Value',
-		name: 'gammaValue',
-		type: 'number',
-		typeOptions: { minValue: 1, maxValue: 3, numberPrecision: 1 },
-		default: 2.2,
-		displayOptions: { show: { operation: ['gamma'] } },
-		description: 'Gamma value between 1.0 (darker) and 3.0 (brighter)',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// tint
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Tint Color',
-		name: 'tintColor',
-		type: 'color',
-		default: '#ff6b35',
-		displayOptions: { show: { operation: ['tint'] } },
-		description: 'Colour to tint the image with',
-	},
-
-	// ────────────────────────────────────────────────────────────────────────
-	// watermark
-	// ────────────────────────────────────────────────────────────────────────
-	{
-		displayName: 'Watermark Image Property',
-		name: 'watermarkProperty',
-		type: 'string',
-		default: 'watermark',
-		placeholder: 'watermark',
-		displayOptions: { show: { operation: ['watermark'] } },
-		description: 'Binary property name containing the watermark image',
-	},
-	{
-		displayName: 'Gravity (Position)',
-		name: 'watermarkGravity',
-		type: 'options',
-		displayOptions: { show: { operation: ['watermark'] } },
-		options: [
-			{ name: 'Center', value: 'centre' },
-			{ name: 'Top Left', value: 'northwest' },
-			{ name: 'Top Center', value: 'north' },
-			{ name: 'Top Right', value: 'northeast' },
-			{ name: 'Middle Left', value: 'west' },
-			{ name: 'Middle Right', value: 'east' },
-			{ name: 'Bottom Left', value: 'southwest' },
-			{ name: 'Bottom Center', value: 'south' },
-			{ name: 'Bottom Right', value: 'southeast' },
-		],
-		default: 'southeast',
-		description: 'Where to place the watermark',
-	},
-	{
-		displayName: 'Opacity (%)',
-		name: 'watermarkOpacity',
-		type: 'number',
-		typeOptions: { minValue: 0, maxValue: 100 },
-		default: 50,
-		displayOptions: { show: { operation: ['watermark'] } },
-		description: 'Watermark opacity from 0 (invisible) to 100 (fully opaque)',
-	},
-	{
-		displayName: 'Max Size (% of Canvas)',
-		name: 'watermarkScale',
-		type: 'number',
-		typeOptions: { minValue: 1, maxValue: 100 },
-		default: 20,
-		displayOptions: { show: { operation: ['watermark'] } },
-		description: 'Scale the watermark so its longest side is this % of the canvas',
-	},
-];
-
-// ---------------------------------------------------------------------------
-// Node class
-// ---------------------------------------------------------------------------
+let cachedFontList: INodePropertyOptions[] | null = null;
 
 export class EditImagePlus implements INodeType {
-	// -------------------------------------------------------------------------
-	// Dynamic font list — populated via fontconfig (fc-list) at open time
-	// -------------------------------------------------------------------------
 	methods = {
 		loadOptions: {
 			async getFontList(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				// eslint-disable-next-line @typescript-eslint/no-var-requires
-				const { exec } = require('child_process') as typeof import('child_process');
-				// eslint-disable-next-line @typescript-eslint/no-var-requires
-				const { promisify } = require('util') as typeof import('util');
-				const execAsync = promisify(exec);
+				if (cachedFontList) {
+					return cachedFontList;
+				}
 
 				const families = new Set<string>();
 
 				try {
-					// fc-list prints one font-family per line; comma-separated when a font has multiple names
-					const { stdout } = await execAsync('fc-list --format="%{family}\\n"', { timeout: 5000 });
+					const { stdout } = await execFileAsync('fc-list', ['--format=%{family}\\n'], {
+						timeout: 5000,
+					});
 					for (const line of stdout.split('\n')) {
 						for (const part of line.split(',')) {
 							const name = part.trim().replace(/^["']|["']$/g, '');
-							if (name && name.length > 1) families.add(name);
+							if (name && name.length > 1) {
+								families.add(name);
+							}
 						}
 					}
 				} catch {
-					// fontconfig unavailable (e.g. Windows dev machine) — return sensible defaults
-					return [
-						{ name: 'Arial', value: 'Arial' },
-						{ name: 'Cinzel', value: 'Cinzel' },
-						{ name: 'Cormorant Garamond', value: 'Cormorant Garamond' },
-						{ name: 'Courier New', value: 'Courier New' },
-						{ name: 'Georgia', value: 'Georgia' },
-						{ name: 'Impact', value: 'Impact' },
-						{ name: 'Inter', value: 'Inter' },
-						{ name: 'Montserrat', value: 'Montserrat' },
-						{ name: 'Playfair Display', value: 'Playfair Display' },
-						{ name: 'Times New Roman', value: 'Times New Roman' },
-						{ name: 'Trebuchet MS', value: 'Trebuchet MS' },
-						{ name: 'Verdana', value: 'Verdana' },
-						{ name: 'Custom (Type below)', value: 'custom' },
-					];
+					cachedFontList = DEFAULT_FONT_OPTIONS;
+					return cachedFontList;
+				}
+
+				if (families.size === 0) {
+					cachedFontList = DEFAULT_FONT_OPTIONS;
+					return cachedFontList;
 				}
 
 				const sorted = [...families].sort((a, b) =>
@@ -1225,9 +71,9 @@ export class EditImagePlus implements INodeType {
 					value: family,
 				}));
 
-				// Always offer a custom escape hatch at the bottom
-				options.push({ name: 'Custom (Type below)', value: 'custom' });
-				return options;
+				options.push({ name: 'Custom (Type Below)', value: 'custom' });
+				cachedFontList = options;
+				return cachedFontList;
 			},
 		},
 	};
@@ -1238,7 +84,8 @@ export class EditImagePlus implements INodeType {
 		icon: 'fa:image',
 		group: ['transform'],
 		version: 1,
-		description: 'Advanced image editing: blur, crop, resize, text, templates, effects and more — powered by Sharp',
+		description:
+			'Advanced image editing: blur, crop, resize, text, templates, effects and more — powered by Sharp',
 		defaults: {
 			name: 'Edit Image+',
 			color: '#553399',
@@ -1271,24 +118,14 @@ export class EditImagePlus implements INodeType {
 				].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
 				default: 'resize',
 			},
-			// Input binary property
+			// Input binary property (hidden only for standalone create & template)
 			{
 				displayName: 'Input Property Name',
 				name: 'dataPropertyName',
 				type: 'string',
 				default: 'data',
 				displayOptions: {
-					hide: { operation: ['information', 'create', 'template'] },
-				},
-				description: 'Name of the binary property that contains the input image',
-			},
-			{
-				displayName: 'Input Property Name',
-				name: 'dataPropertyName',
-				type: 'string',
-				default: 'data',
-				displayOptions: {
-					show: { operation: ['information'] },
+					hide: { operation: ['create', 'template'] },
 				},
 				description: 'Name of the binary property that contains the input image',
 			},
@@ -1339,12 +176,11 @@ export class EditImagePlus implements INodeType {
 				displayOptions: { hide: { operation: ['information'] } },
 				options: [
 					{
-						displayName: 'Output Property Name',
-						name: 'outputPropertyName',
+						displayName: 'File Name',
+						name: 'fileName',
 						type: 'string',
 						default: '',
-						placeholder: 'Leave blank to overwrite input property',
-						description: 'Binary property name for the output image',
+						description: 'Override the file name stored in binary data',
 					},
 					{
 						displayName: 'Format',
@@ -1362,13 +198,19 @@ export class EditImagePlus implements INodeType {
 						description: 'Output image format',
 					},
 					{
-						displayName: 'Quality (JPEG / WebP / AVIF)',
-						name: 'quality',
-						type: 'number',
-						typeOptions: { minValue: 1, maxValue: 100 },
-						default: 90,
-						displayOptions: { show: { format: ['jpeg', 'webp', 'avif'] } },
-						description: 'Output quality 1–100 (higher = better quality, larger file)',
+						displayName: 'Keep Metadata (EXIF / ICC)',
+						name: 'keepMetadata',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to preserve EXIF metadata and ICC colour profiles in the output image',
+					},
+					{
+						displayName: 'Output Property Name',
+						name: 'outputPropertyName',
+						type: 'string',
+						default: '',
+						placeholder: 'Leave blank to overwrite input property',
+						description: 'Binary property name for the output image',
 					},
 					{
 						displayName: 'PNG Compression Level',
@@ -1380,86 +222,127 @@ export class EditImagePlus implements INodeType {
 						description: 'PNG compression level 0 (fastest) to 9 (smallest)',
 					},
 					{
-						displayName: 'File Name',
-						name: 'fileName',
-						type: 'string',
-						default: '',
-						description: 'Override the file name stored in binary data',
+						displayName: 'Quality (JPEG / WebP / AVIF / TIFF)',
+						name: 'quality',
+						type: 'number',
+						typeOptions: { minValue: 1, maxValue: 100 },
+						default: 90,
+						displayOptions: { show: { format: ['jpeg', 'webp', 'avif', 'tiff'] } },
+						description: 'Output quality 1–100 (higher = better quality, larger file)',
 					},
 				],
 			},
 		],
 	};
 
-	// -------------------------------------------------------------------------
-	// execute
-	// -------------------------------------------------------------------------
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			const item = items[itemIndex];
 			try {
-				const item = items[itemIndex];
 				const operation = this.getNodeParameter('operation', itemIndex) as string;
-				const dataPropertyName = this.getNodeParameter('dataPropertyName', itemIndex, 'data') as string;
+				const dataPropertyName = this.getNodeParameter(
+					'dataPropertyName',
+					itemIndex,
+					'data',
+				) as string;
 				const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
-
-				// Determine which operations list to process
-				let operations: IDataObject[] = [];
-				if (operation === 'multiStep') {
-					const operationsData = this.getNodeParameter('operations', itemIndex, { operations: [] }) as IDataObject;
-					operations = (operationsData.operations as IDataObject[]) ?? [];
-				} else {
-					// Collect all parameters for single operation
-					const singleOp = buildSingleOpParams(this, operation, itemIndex);
-					operations = [{ operation, ...singleOp }];
-				}
 
 				// ── Get information ─────────────────────────────────────────
 				if (operation === 'information') {
 					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
 					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, dataPropertyName);
-					const meta = await sharp(buf).metadata();
+					const infoSharp = createSafeSharp(buf);
+					const meta = await assertSafeInputMetadata(infoSharp, 'Get Information operation');
 					returnData.push({
-						json: meta as unknown as IDataObject,
+						json: formatSafeMetadata(meta) as IDataObject,
 						pairedItem: { item: itemIndex },
 					});
 					continue;
 				}
 
-				// ── Determine output property name ──────────────────────────
-				const outputPropertyName = ((options.outputPropertyName as string) || '') || dataPropertyName;
+				// Determine which operations list to process
+				let operations: IDataObject[] = [];
+				if (operation === 'multiStep') {
+					const operationsData = this.getNodeParameter('operations', itemIndex, {
+						operations: [],
+					}) as IDataObject;
+					operations = (operationsData.operations as IDataObject[]) ?? [];
+					if (operations.length === 0) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Multi Step operation requires at least one step to be configured.',
+							{ itemIndex },
+						);
+					}
+				} else {
+					const singleOp = buildSingleOpParams(this, operation, itemIndex);
+					operations = [{ operation, ...singleOp }];
+				}
 
-				// ── Build sharp pipeline ─────────────────────────────────────
+				const outputPropertyName =
+					((options.outputPropertyName as string) || '').trim() || dataPropertyName;
+				const keepMetadata = options.keepMetadata === true;
+
+				// ── Initialize base Sharp pipeline ──────────────────────────
 				let sharpInstance: sharp.Sharp;
+				const firstOp = operations[0]?.operation as string | undefined;
 
-				if (operations[0]?.operation === 'create') {
-					const op = operations[0];
-					const bg = hexToRgba(op.backgroundColor as string ?? '#ffffff');
-					sharpInstance = sharp({
-						create: {
-							width: op.width as number,
-							height: op.height as number,
-							channels: 4,
-							background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
-						},
-					});
-				} else if (operations[0]?.operation === 'template') {
+				if (firstOp === 'create') {
+					sharpInstance = createBlankCanvas(operations[0]);
+				} else if (firstOp === 'template') {
 					sharpInstance = await buildTemplateInstance(operations[0]);
 				} else {
 					this.helpers.assertBinaryData(itemIndex, dataPropertyName);
 					const buf = await this.helpers.getBinaryDataBuffer(itemIndex, dataPropertyName);
-					sharpInstance = sharp(buf);
+					sharpInstance = createSafeSharp(buf);
+					const inputMeta = await assertSafeInputMetadata(sharpInstance, 'Input image');
+					if (inputMeta.orientation !== undefined && inputMeta.orientation > 1) {
+						const orientedPipe = keepMetadata
+							? sharpInstance.rotate().withMetadata({ orientation: 1 })
+							: sharpInstance.rotate();
+						const orientedBuf = await orientedPipe.png().toBuffer();
+						sharpInstance = createSafeSharp(orientedBuf);
+					}
 				}
 
-				// Apply each operation
-				for (const op of operations) {
-					sharpInstance = await applyOperation(this, sharpInstance, op, itemIndex);
+				// ── Apply each operation in sequence ────────────────────────
+				for (let stepIdx = 0; stepIdx < operations.length; stepIdx++) {
+					const op = operations[stepIdx];
+					const opName = (op.operation as string) || 'unknown';
+					try {
+						sharpInstance = await applyOperation(this, sharpInstance, op, itemIndex, stepIdx);
+						// When chaining multiple steps, materialize after each intermediate step so the next
+						// step sees accurate post-transform .metadata() and does not overwrite .composite()
+						if (operations.length > 1 && stepIdx < operations.length - 1) {
+							if (keepMetadata) {
+								sharpInstance = sharpInstance.withMetadata();
+							}
+							const stepBuf = await sharpInstance.png().toBuffer();
+							sharpInstance = createSafeSharp(stepBuf);
+						}
+					} catch (stepError) {
+						const prefix =
+							operations.length > 1
+								? `Step ${stepIdx + 1}/${operations.length} (${opName}) failed: `
+								: '';
+						throw new NodeOperationError(
+							this.getNode(),
+							`${prefix}${(stepError as Error).message}`,
+							{ itemIndex },
+						);
+					}
+				}
+
+				// ── Optional metadata preservation ──────────────────────────
+				if (keepMetadata) {
+					sharpInstance = sharpInstance.withMetadata();
 				}
 
 				// ── Output format ───────────────────────────────────────────
-				const fmt = (options.format as string) || 'png';
+				const fmt = ((options.format as string) || 'png').toLowerCase();
 				const mimeType = `image/${fmt}`;
 				const quality = (options.quality as number) ?? 90;
 				const pngLevel = (options.pngCompressionLevel as number) ?? 6;
@@ -1489,19 +372,18 @@ export class EditImagePlus implements INodeType {
 					pairedItem: { item: itemIndex },
 				};
 
-				const fileName = (options.fileName as string) || `image.${fmt}`;
-				const binaryData = await this.helpers.prepareBinaryData(
-					outputBuffer,
-					fileName,
-					mimeType,
-				);
+				const fileName = normalizeOutputFileName(options.fileName, fmt);
+				const binaryData = await this.helpers.prepareBinaryData(outputBuffer, fileName, mimeType);
 				newItem.binary![outputPropertyName] = binaryData;
 
 				returnData.push(newItem);
 			} catch (error) {
 				if (this.continueOnFail()) {
 					returnData.push({
-						json: { error: (error as Error).message },
+						json: {
+							...deepCopy(item.json),
+							error: (error as Error).message,
+						},
 						pairedItem: { item: itemIndex },
 					});
 					continue;
@@ -1514,625 +396,3 @@ export class EditImagePlus implements INodeType {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Parameter collector for single-step mode
-// ---------------------------------------------------------------------------
-
-function buildSingleOpParams(ctx: IExecuteFunctions, operation: string, itemIndex: number): IDataObject {
-	const paramNames: Record<string, string[]> = {
-		blur: ['sigma'],
-		border: ['borderColor', 'borderWidth', 'borderHeight'],
-		composite: ['dataPropertyNameComposite', 'operator', 'positionX', 'positionY'],
-		create: ['backgroundColor', 'width', 'height'],
-		crop: ['width', 'height', 'positionX', 'positionY'],
-		draw: ['color', 'strokeColor', 'strokeWidth', 'cornerRadius', 'endPositionX', 'endPositionY', 'primitive', 'startPositionX', 'startPositionY'],
-		flip: [],
-		flop: [],
-		gamma: ['gammaValue'],
-		grayscale: [],
-		normalize: [],
-		resize: ['width', 'height', 'resizeOption', 'resizeBackground'],
-		rotate: ['backgroundColor', 'rotate'],
-		sepia: [],
-		sharpen: ['sharpenSigma', 'sharpenFlat', 'sharpenJagged'],
-		shear: ['degreesX', 'degreesY'],
-		template: ['templateName', 'customWidth', 'customHeight', 'templateBgColor', 'templateGradientColor', 'templateLayout', 'templateTitle', 'templateTitleFont', 'templateTitleFontCustom', 'templateTitleFontStyle', 'templateTitleColor', 'templateSubtitle', 'templateSubtitleFont', 'templateSubtitleFontCustom', 'templateSubtitleFontStyle', 'templateSubtitleColor', 'templateQuote', 'templateQuoteFont', 'templateQuoteFontCustom', 'templateQuoteFontStyle', 'templateQuoteAuthor', 'templateQuoteAuthorFont', 'templateQuoteAuthorFontCustom', 'templateQuoteAuthorFontStyle', 'templateMemeTop', 'templateMemeTopFont', 'templateMemeTopFontCustom', 'templateMemeTopFontStyle', 'templateMemeBottom', 'templateMemeBottomFont', 'templateMemeBottomFontCustom', 'templateMemeBottomFontStyle', 'templateAccentColor', 'templateTextEffect', 'templateEffectColor', 'templateEffectOpacity', 'templateEffectBlur', 'templateEffectOffsetX', 'templateEffectOffsetY', 'templateEffectOutlineWidth', 'quoteWatermarkText', 'quoteWatermarkFont', 'quoteWatermarkFontCustom', 'quoteWatermarkColor', 'quoteWatermarkOpacity', 'quoteWatermarkX', 'quoteWatermarkY'],
-		text: ['text', 'fontSize', 'fontFamily', 'fontFamilyCustom', 'fontColor', 'fontWeight', 'fontStyle', 'textAlign', 'positionX', 'positionY', 'lineHeight', 'lineLength', 'textShadow'],
-		tint: ['tintColor'],
-		transparent: ['transparentColor', 'tolerance'],
-		watermark: ['watermarkProperty', 'watermarkGravity', 'watermarkOpacity', 'watermarkScale'],
-	};
-
-	const result: IDataObject = {};
-	const params = paramNames[operation] ?? [];
-	for (const p of params) {
-		try {
-			result[p] = ctx.getNodeParameter(p, itemIndex);
-		} catch (_) {
-			// Parameter not set — use default from node definition
-		}
-	}
-	return result;
-}
-
-// ---------------------------------------------------------------------------
-// Template builder
-// ---------------------------------------------------------------------------
-
-async function buildTemplateInstance(op: IDataObject): Promise<sharp.Sharp> {
-	const templateName = op.templateName as string;
-	const tpl = IMAGE_TEMPLATES.find((t) => t.name === templateName) ?? IMAGE_TEMPLATES[0];
-	const width = templateName === 'Custom' ? (op.customWidth as number ?? 800) : tpl.width;
-	const height = templateName === 'Custom' ? (op.customHeight as number ?? 600) : tpl.height;
-
-	const bg = hexToRgba(op.templateBgColor as string ?? '#1a1a2e');
-	const layout = op.templateLayout as string ?? 'standard';
-	
-	const titleText = escapeSvg((op.templateTitle as string ?? '').trim());
-	const subtitleText = escapeSvg((op.templateSubtitle as string ?? '').trim());
-	const titleColor = op.templateTitleColor as string ?? '#ffffff';
-	const subtitleColor = op.templateSubtitleColor as string ?? '#cccccc';
-	const accentColor = op.templateAccentColor as string ?? '#e94560';
-	const gradientColor = op.templateGradientColor as string ?? accentColor;
-	
-	const quoteText = escapeSvg((op.templateQuote as string ?? '').trim());
-	const quoteAuthor = escapeSvg((op.templateQuoteAuthor as string ?? '').trim());
-
-	const memeTop = escapeSvg((op.templateMemeTop as string ?? '').toUpperCase().trim());
-	const memeBottom = escapeSvg((op.templateMemeBottom as string ?? '').toUpperCase().trim());
-
-	const parseFontStyle = (styleStr: string) => {
-		let attrs = '';
-		if (styleStr.includes('bold')) attrs += ' font-weight="bold"';
-		if (styleStr.includes('italic')) attrs += ' font-style="italic"';
-		return attrs;
-	};
-
-	// Fonts — use toSvgFontFamily to handle both new plain-name values ("Arial") and legacy CSS stacks ("Arial, sans-serif")
-	const titleFont = toSvgFontFamily(op.templateTitleFont === 'custom' ? (op.templateTitleFontCustom as string || 'Arial') : (op.templateTitleFont as string || 'Arial'));
-	const subtitleFont = toSvgFontFamily(op.templateSubtitleFont === 'custom' ? (op.templateSubtitleFontCustom as string || 'Arial') : (op.templateSubtitleFont as string || 'Arial'));
-	const quoteFont = toSvgFontFamily(op.templateQuoteFont === 'custom' ? (op.templateQuoteFontCustom as string || 'Georgia') : (op.templateQuoteFont as string || 'Georgia'));
-	const authorFont = toSvgFontFamily(op.templateQuoteAuthorFont === 'custom' ? (op.templateQuoteAuthorFontCustom as string || 'Arial') : (op.templateQuoteAuthorFont as string || 'Arial'));
-	const memeTopFont = toSvgFontFamily(op.templateMemeTopFont === 'custom' ? (op.templateMemeTopFontCustom as string || 'Impact') : (op.templateMemeTopFont as string || 'Impact'));
-	const memeBottomFont = toSvgFontFamily(op.templateMemeBottomFont === 'custom' ? (op.templateMemeBottomFontCustom as string || 'Impact') : (op.templateMemeBottomFont as string || 'Impact'));
-
-	const titleStyleAttr = parseFontStyle((op.templateTitleFontStyle as string) ?? 'bold');
-	const subtitleStyleAttr = parseFontStyle((op.templateSubtitleFontStyle as string) ?? 'normal');
-	const quoteStyleAttr = parseFontStyle((op.templateQuoteFontStyle as string) ?? 'italic');
-	const authorStyleAttr = parseFontStyle((op.templateQuoteAuthorFontStyle as string) ?? 'normal');
-	const memeTopStyleAttr = parseFontStyle((op.templateMemeTopFontStyle as string) ?? 'bold');
-	const memeBottomStyleAttr = parseFontStyle((op.templateMemeBottomFontStyle as string) ?? 'bold');
-
-	// Quote Watermark
-	const quoteWmText = escapeSvg((op.quoteWatermarkText as string ?? '').trim());
-	const quoteWmFont = toSvgFontFamily(op.quoteWatermarkFont === 'custom' ? (op.quoteWatermarkFontCustom as string || 'Arial') : (op.quoteWatermarkFont as string || 'Arial'));
-	const quoteWmColor = op.quoteWatermarkColor as string ?? '#ffffff';
-	const quoteWmOpacity = (op.quoteWatermarkOpacity as number ?? 30) / 100;
-	const quoteWmX = op.quoteWatermarkX as number ?? 50;
-	const quoteWmY = op.quoteWatermarkY as number ?? 95;
-
-	// Text Effects
-	const textEffect = op.templateTextEffect as string ?? 'default';
-	const effectColor = op.templateEffectColor as string ?? '#000000';
-	const effectOpacity = (op.templateEffectOpacity as number ?? 50) / 100;
-	const effectBlur = op.templateEffectBlur as number ?? 4;
-	const effectOffsetX = op.templateEffectOffsetX as number ?? 2;
-	const effectOffsetY = op.templateEffectOffsetY as number ?? 2;
-	const effectOutlineWidth = op.templateEffectOutlineWidth as number ?? 2;
-
-	let customFilterSvg = '';
-	let applyFilterAttr = '';
-	let applyStrokeAttr = '';
-
-	if (textEffect === 'default') {
-		// Backwards compatibility
-		customFilterSvg = `
-    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="2" dy="2" stdDeviation="4" flood-opacity="0.5"/>
-    </filter>`;
-		applyFilterAttr = 'filter="url(#shadow)"'; 
-	} else if (textEffect === 'shadow') {
-		customFilterSvg = `
-    <filter id="customEffect" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="${effectOffsetX}" dy="${effectOffsetY}" stdDeviation="${effectBlur}" flood-color="${effectColor}" flood-opacity="${effectOpacity}"/>
-    </filter>`;
-		applyFilterAttr = 'filter="url(#customEffect)"';
-	} else if (textEffect === 'glow') {
-		customFilterSvg = `
-    <filter id="customEffect" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="0" stdDeviation="${effectBlur}" flood-color="${effectColor}" flood-opacity="${effectOpacity}"/>
-    </filter>`;
-		applyFilterAttr = 'filter="url(#customEffect)"';
-	} else if (textEffect === 'outline') {
-		applyStrokeAttr = `stroke="${effectColor}" stroke-width="${effectOutlineWidth}" stroke-linejoin="round"`;
-	}
-
-	const effectAttrMain = textEffect === 'default' ? 'filter="url(#shadow)"' : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
-	const effectAttrSub = textEffect === 'default' ? '' : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
-
-	// Responsive font sizes
-	const titleFontSize = Math.max(24, Math.round(width * 0.065));
-	const subtitleFontSize = Math.max(16, Math.round(width * 0.033));
-	const padding = Math.round(width * 0.06);
-	const accentBarH = Math.max(4, Math.round(height * 0.006));
-
-	// Title Y position — roughly 45% from top
-	const titleY = Math.round(height * 0.45);
-	const subtitleY = titleY + titleFontSize * 1.6;
-
-	// Accent bar X and Y
-	let accentBarX = padding;
-	let accentBarY = titleY - titleFontSize * 1.4;
-
-	let titleSvg = '';
-	if (titleText && layout === 'standard') {
-		titleSvg = `
-		<text
-			x="${padding}" y="${titleY}"
-			font-family="${titleFont}"
-			font-size="${titleFontSize}"${titleStyleAttr}
-			fill="${titleColor}"
-			${effectAttrMain}
-		>${titleText}</text>`;
-	}
-
-	let subtitleSvg = '';
-	if (subtitleText && layout === 'standard') {
-		subtitleSvg = `
-		<text
-			x="${padding}" y="${subtitleY}"
-			font-family="${subtitleFont}"
-			font-size="${subtitleFontSize}"${subtitleStyleAttr}
-			fill="${subtitleColor}"
-			opacity="0.9"
-			${effectAttrSub}
-		>${subtitleText}</text>`;
-	}
-
-	let quoteSvg = '';
-	if (quoteText && layout === 'quote') {
-		const qFontSize = Math.max(24, Math.round(width * 0.055));
-		const maxCharsPerLine = Math.floor(width / (qFontSize * 0.6));
-		const words = quoteText.split(' ');
-		const lines = [];
-		let curLine = '';
-		for (const w of words) {
-			if ((curLine + w).length > maxCharsPerLine) {
-				lines.push(curLine.trim());
-				curLine = w + ' ';
-			} else {
-				curLine += w + ' ';
-			}
-		}
-		if (curLine) lines.push(curLine.trim());
-
-		// Center vertically, accounting for multi-line
-		const startY = Math.round(height * 0.5) - ((lines.length - 1) * (qFontSize * 1.5) / 2);
-		
-		// Update accent bar to sit above the quote
-		accentBarX = padding;
-		accentBarY = startY - (qFontSize * 1.5);
-
-		const tspans = lines.map((l, i) => `<tspan x="${width / 2}" dy="${i === 0 ? 0 : qFontSize * 1.5}">${l}</tspan>`).join('');
-		
-		quoteSvg = `
-		<text
-			x="${width / 2}" y="${startY}"
-			font-family="${quoteFont}"
-			font-size="${qFontSize}"${quoteStyleAttr}
-			fill="${titleColor}"
-			text-anchor="middle"
-			${effectAttrMain}
-		>${tspans}</text>`;
-	}
-
-	let authorSvg = '';
-	if (quoteAuthor && layout === 'quote') {
-		const aFontSize = Math.max(16, Math.round(width * 0.035));
-		authorSvg = `
-		<text
-			x="${width / 2}" y="${height - padding}"
-			font-family="${authorFont}"
-			font-size="${aFontSize}"${authorStyleAttr}
-			fill="${subtitleColor}"
-			text-anchor="middle"
-			opacity="0.9"
-			${effectAttrSub}
-		>— ${quoteAuthor}</text>`;
-	}
-
-	let memeSvg = '';
-	if (layout === 'meme') {
-		const mFontSize = Math.max(30, Math.round(height * 0.1));
-		
-		const defaultMemeStroke = `stroke="#000000" stroke-width="${Math.max(1, Math.round(mFontSize * 0.05))}"`;
-		const memeEffectAttr = textEffect === 'default' ? defaultMemeStroke : `${applyFilterAttr} ${applyStrokeAttr}`.trim();
-
-		// For meme layout, move the accent bar far above the text or hide it by placing it off-screen
-		accentBarY = -1000;
-		if (memeTop) {
-			memeSvg += `
-			<text
-				x="${width / 2}" y="${mFontSize * 1.1}"
-				font-family="${memeTopFont}"
-				font-size="${mFontSize}"${memeTopStyleAttr}
-				fill="${titleColor}"
-				${memeEffectAttr}
-				text-anchor="middle"
-			>${memeTop}</text>`;
-		}
-		if (memeBottom) {
-			memeSvg += `
-			<text
-				x="${width / 2}" y="${height - (mFontSize * 0.3)}"
-				font-family="${memeBottomFont}"
-				font-size="${mFontSize}"${memeBottomStyleAttr}
-				fill="${titleColor}"
-				${memeEffectAttr}
-				text-anchor="middle"
-			>${memeBottom}</text>`;
-		}
-	}
-
-	let quoteWatermarkSvg = '';
-	if (quoteWmText && layout === 'quote') {
-		const wmFontSize = Math.max(12, Math.round(width * 0.025));
-		const wmX = (width * quoteWmX) / 100;
-		const wmY = (height * quoteWmY) / 100;
-		quoteWatermarkSvg = `
-		<text
-			x="${wmX}" y="${wmY}"
-			font-family="${quoteWmFont}"
-			font-size="${wmFontSize}"
-			fill="${quoteWmColor}"
-			opacity="${quoteWmOpacity}"
-			text-anchor="middle"
-		>${quoteWmText}</text>`;
-	}
-
-	const svg = `
-<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-${customFilterSvg}
-  </defs>
-  <!-- Background -->
-  <rect width="${width}" height="${height}" fill="${op.templateBgColor ?? '#1a1a2e'}"/>
-  <!-- Subtle gradient overlay -->
-  <defs>
-    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="${gradientColor}" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="${gradientColor}" stop-opacity="0.02"/>
-    </linearGradient>
-  </defs>
-  <rect width="${width}" height="${height}" fill="url(#grad)"/>
-  <!-- Accent bar -->
-  <rect x="${accentBarX}" y="${accentBarY}" width="${Math.round(width * 0.12)}" height="${accentBarH}" fill="${accentColor}" rx="${Math.round(accentBarH / 2)}"/>
-  ${titleSvg}
-  ${subtitleSvg}
-  ${quoteSvg}
-  ${authorSvg}
-  ${memeSvg}
-  ${quoteWatermarkSvg}
-  <!-- Corner decoration -->
-  <rect x="${width - 60}" y="${height - 60}" width="40" height="4" fill="${accentColor}" opacity="0.6" rx="2"/>
-  <rect x="${width - 24}" y="${height - 60}" width="4" height="40" fill="${accentColor}" opacity="0.6" rx="2"/>
-</svg>`;
-
-	const base = sharp({
-		create: {
-			width,
-			height,
-			channels: 4,
-			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
-		},
-	});
-
-	return base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
-}
-
-// ---------------------------------------------------------------------------
-// Operation applier
-// ---------------------------------------------------------------------------
-
-async function applyOperation(
-	ctx: IExecuteFunctions,
-	instance: sharp.Sharp,
-	op: IDataObject,
-	itemIndex: number,
-): Promise<sharp.Sharp> {
-	const operation = op.operation as string;
-
-	if (operation === 'blur') {
-		const sigma = Math.max(0.3, (op.sigma as number) ?? 3);
-		return instance.blur(sigma);
-	}
-
-	if (operation === 'border') {
-		const bw = (op.borderWidth as number) ?? 20;
-		const bh = (op.borderHeight as number) ?? 20;
-		const col = hexToRgba((op.borderColor as string) ?? '#000000');
-		return instance.extend({
-			top: bh,
-			bottom: bh,
-			left: bw,
-			right: bw,
-			background: { r: col.r, g: col.g, b: col.b, alpha: col.alpha },
-		});
-	}
-
-	if (operation === 'composite') {
-		const propName = op.dataPropertyNameComposite as string;
-		ctx.helpers.assertBinaryData(itemIndex, propName);
-		const overlayBuf = await ctx.helpers.getBinaryDataBuffer(itemIndex, propName);
-		return instance.composite([{
-			input: overlayBuf,
-			left: (op.positionX as number) ?? 0,
-			top: (op.positionY as number) ?? 0,
-			blend: (op.operator as sharp.Blend) ?? 'over',
-		}]);
-	}
-
-	if (operation === 'create') {
-		// Already handled before the loop — skip
-		return instance;
-	}
-
-	if (operation === 'template') {
-		// Already handled before the loop — skip
-		return instance;
-	}
-
-	if (operation === 'crop') {
-		return instance.extract({
-			left: (op.positionX as number) ?? 0,
-			top: (op.positionY as number) ?? 0,
-			width: (op.width as number) ?? 500,
-			height: (op.height as number) ?? 500,
-		});
-	}
-
-	if (operation === 'draw') {
-		const meta = await instance.metadata();
-		const imgW = meta.width ?? 800;
-		const imgH = meta.height ?? 600;
-		const fillColor = op.color as string ?? '#ff0000';
-		const strokeColor = op.strokeColor as string ?? '#000000';
-		const strokeWidth = (op.strokeWidth as number) ?? 0;
-		const x1 = (op.startPositionX as number) ?? 0;
-		const y1 = (op.startPositionY as number) ?? 0;
-		const x2 = (op.endPositionX as number) ?? 100;
-		const y2 = (op.endPositionY as number) ?? 100;
-		const primitive = op.primitive as string ?? 'rectangle';
-		const cr = (op.cornerRadius as number) ?? 0;
-		const strokeAttr = strokeWidth > 0 ? `stroke="${strokeColor}" stroke-width="${strokeWidth}"` : 'stroke="none"';
-
-		let shapeSvg = '';
-		if (primitive === 'rectangle') {
-			const w = Math.abs(x2 - x1);
-			const h = Math.abs(y2 - y1);
-			shapeSvg = `<rect x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${w}" height="${h}" rx="${cr}" ry="${cr}" fill="${fillColor}" ${strokeAttr}/>`;
-		} else if (primitive === 'circle') {
-			const cx = (x1 + x2) / 2;
-			const cy = (y1 + y2) / 2;
-			const rx = Math.abs(x2 - x1) / 2;
-			const ry = Math.abs(y2 - y1) / 2;
-			shapeSvg = `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${fillColor}" ${strokeAttr}/>`;
-		} else if (primitive === 'line') {
-			shapeSvg = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${fillColor}" stroke-width="${Math.max(1, strokeWidth || 2)}" stroke-linecap="round"/>`;
-		}
-
-		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">${shapeSvg}</svg>`;
-		return instance.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
-	}
-
-	if (operation === 'flip') {
-		return instance.flip();
-	}
-
-	if (operation === 'flop') {
-		return instance.flop();
-	}
-
-	if (operation === 'gamma') {
-		const g = (op.gammaValue as number) ?? 2.2;
-		return instance.gamma(g);
-	}
-
-	if (operation === 'grayscale') {
-		return instance.grayscale();
-	}
-
-	if (operation === 'normalize') {
-		return instance.normalize();
-	}
-
-	if (operation === 'resize') {
-		const fitMap: Record<string, keyof sharp.FitEnum> = {
-			cover: 'cover',
-			contain: 'contain',
-			fill: 'fill',
-			inside: 'inside',
-			outside: 'outside',
-		};
-		const fit = fitMap[(op.resizeOption as string) ?? 'cover'] ?? 'cover';
-		const bg = op.resizeBackground ? hexToRgba(op.resizeBackground as string) : { r: 0, g: 0, b: 0, alpha: 1 };
-		return instance.resize({
-			width: (op.width as number) ?? 1080,
-			height: (op.height as number) ?? 1080,
-			fit,
-			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
-			withoutEnlargement: false,
-		});
-	}
-
-	if (operation === 'rotate') {
-		const bg = hexToRgba((op.backgroundColor as string) ?? '#00000000');
-		return instance.rotate((op.rotate as number) ?? 0, {
-			background: { r: bg.r, g: bg.g, b: bg.b, alpha: bg.alpha },
-		});
-	}
-
-	if (operation === 'sepia') {
-		// Sepia via colour recombination matrix
-		return instance.recomb([
-			[0.3588, 0.7044, 0.1368],
-			[0.2990, 0.5870, 0.1140],
-			[0.2392, 0.4696, 0.0912],
-		]);
-	}
-
-	if (operation === 'sharpen') {
-		const sigma = (op.sharpenSigma as number) ?? 1;
-		const flat = (op.sharpenFlat as number) ?? 1;
-		const jagged = (op.sharpenJagged as number) ?? 2;
-		return instance.sharpen({ sigma, m1: flat, m2: jagged });
-	}
-
-	if (operation === 'shear') {
-		const dx = (op.degreesX as number) ?? 0;
-		const dy = (op.degreesY as number) ?? 10;
-		// Shear via affine transform: [a, b, c, d] where shear-x = tan(dx), shear-y = tan(dy)
-		const tanX = Math.tan((dx * Math.PI) / 180);
-		const tanY = Math.tan((dy * Math.PI) / 180);
-		return instance.affine([1, tanX, tanY, 1], { background: '#00000000' });
-	}
-
-	if (operation === 'text') {
-		const meta = await instance.metadata();
-		const imgW = meta.width ?? 800;
-		const imgH = meta.height ?? 600;
-
-		const rawText = (op.text as string) ?? '';
-		const lineLen = (op.lineLength as number) ?? 40;
-		const wrapped = wrapText(rawText, lineLen);
-		const lines = wrapped.split('\n');
-
-		const fontSize = (op.fontSize as number) ?? 48;
-		const fontColor = (op.fontColor as string) ?? '#ffffff';
-		const rawStyle = (op.fontStyle as string) ?? 'normal';
-		const legacyWeight = (op.fontWeight as string) ?? 'normal';
-
-		let fontWeight = legacyWeight;
-		let fontStyle = 'normal';
-
-		if (rawStyle.includes('bold')) {
-			fontWeight = 'bold';
-		}
-		if (rawStyle.includes('italic')) {
-			fontStyle = 'italic';
-		}
-
-		// Resolve font family — custom overrides the dropdown value; toSvgFontFamily handles quoting
-		const rawFamily = (op.fontFamily as string) ?? 'Arial';
-		const resolvedFamily = rawFamily === 'custom'
-			? ((op.fontFamilyCustom as string) || 'Arial')
-			: rawFamily;
-		const fontFamily = toSvgFontFamily(resolvedFamily);
-
-		const textAlign = (op.textAlign as string) ?? 'middle';
-		const posX = (op.positionX as number) ?? imgW / 2;
-		const posY = (op.positionY as number) ?? imgH / 2;
-		const lineHeight = ((op.lineHeight as number) ?? 1.4) * fontSize;
-		const shadow = (op.textShadow as boolean) ?? false;
-
-		const shadowFilter = shadow
-			? `<filter id="ts"><feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.6"/></filter>`
-			: '';
-
-		const tspans = lines
-			.map((line, i) => `<tspan x="${posX}" dy="${i === 0 ? 0 : lineHeight}">${escapeSvg(line)}</tspan>`)
-			.join('');
-
-		const textBaseAttrs = `
-    x="${posX}" y="${posY}"
-    font-family="${fontFamily}"
-    font-size="${fontSize}"
-    font-weight="${fontWeight}"
-    font-style="${fontStyle}"
-    text-anchor="${textAlign}"
-    dominant-baseline="middle"`;
-
-		const shadowElement = shadow 
-			? `<text ${textBaseAttrs} fill="${fontColor}" filter="url(#ts)">${tspans}</text>`
-			: '';
-
-		const svg = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">
-  <defs>${shadowFilter}</defs>
-  ${shadowElement}
-  <text ${textBaseAttrs} fill="${fontColor}">${tspans}</text>
-</svg>`;
-
-		return instance.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]);
-	}
-
-	if (operation === 'tint') {
-		const col = hexToRgba((op.tintColor as string) ?? '#ff6b35');
-		return instance.tint({ r: col.r, g: col.g, b: col.b });
-	}
-
-	if (operation === 'transparent') {
-		// Flatten to ensure RGBA, then threshold pixels near the target colour
-		const targetCol = hexToRgba((op.transparentColor as string) ?? '#ffffff');
-		const tolerance = (op.tolerance as number) ?? 30;
-
-		// We use sharp's raw pixel manipulation to set matching pixels to transparent
-		const meta = await instance.metadata();
-		const w = meta.width ?? 0;
-		const h = meta.height ?? 0;
-
-		const rawData = await instance.ensureAlpha().raw().toBuffer();
-		const pixels = new Uint8Array(rawData);
-
-		for (let j = 0; j < w * h; j++) {
-			const idx = j * 4;
-			const dr = Math.abs(pixels[idx] - targetCol.r);
-			const dg = Math.abs(pixels[idx + 1] - targetCol.g);
-			const db = Math.abs(pixels[idx + 2] - targetCol.b);
-			if (dr <= tolerance && dg <= tolerance && db <= tolerance) {
-				pixels[idx + 3] = 0;
-			}
-		}
-
-		return sharp(Buffer.from(pixels), { raw: { width: w, height: h, channels: 4 } });
-	}
-
-	if (operation === 'watermark') {
-		const wmProp = (op.watermarkProperty as string) ?? 'watermark';
-		ctx.helpers.assertBinaryData(itemIndex, wmProp);
-		const wmBuf = await ctx.helpers.getBinaryDataBuffer(itemIndex, wmProp);
-
-		const meta = await instance.metadata();
-		const imgW = meta.width ?? 800;
-		const imgH = meta.height ?? 600;
-		const scalePercent = (op.watermarkScale as number) ?? 20;
-		const opacity = Math.min(1, Math.max(0, ((op.watermarkOpacity as number) ?? 50) / 100));
-		const gravity = (op.watermarkGravity as string) ?? 'southeast';
-
-		// Scale watermark
-		const maxDim = Math.round(Math.max(imgW, imgH) * (scalePercent / 100));
-		const wmResized = await sharp(wmBuf)
-			.resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
-			.ensureAlpha()
-			.raw()
-			.toBuffer({ resolveWithObject: true });
-
-		// Apply opacity to alpha channel
-		const rawPixels = new Uint8Array(wmResized.data);
-		for (let j = 0; j < rawPixels.length / 4; j++) {
-			rawPixels[j * 4 + 3] = Math.round(rawPixels[j * 4 + 3] * opacity);
-		}
-
-		const wmW = wmResized.info.width;
-		const wmH = wmResized.info.height;
-		const wmProcessed = sharp(Buffer.from(rawPixels), { raw: { width: wmW, height: wmH, channels: 4 } }).png();
-
-		return instance.composite([{
-			input: await wmProcessed.toBuffer(),
-			gravity: gravity as sharp.Gravity,
-			blend: 'over',
-		}]);
-	}
-
-	// Unknown operation — return unchanged (pass-through)
-	return instance;
-}
