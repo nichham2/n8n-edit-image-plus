@@ -381,8 +381,9 @@ async function runTests() {
 	// 8. Extended Color Parsing, Long-Word Wrapping, Filename Traversal Sanitization & Standard/Meme Template Wrapping
 	{
 		assert.strictEqual(sanitizeCssColor('rgb(255, 0, 128)', '#000000'), '#ff0080');
-		assert.strictEqual(sanitizeCssColor('rgba(0, 255, 0, 0)', '#000000'), '#00ff0000');
-		assert.strictEqual(sanitizeCssColor('transparent', '#ffffff'), '#00000000');
+		assert.strictEqual(sanitizeCssColor('rgba(0, 255, 0, 0)', '#000000'), 'rgba(0, 255, 0, 0)');
+		assert.strictEqual(sanitizeCssColor('transparent', '#ffffff'), 'rgba(0, 0, 0, 0)');
+		assert.strictEqual(sanitizeCssColor('#00ff0080', '#000000'), 'rgba(0, 255, 0, 0.502)');
 		assert.deepStrictEqual(hexToRgba('rgba(255, 0, 0, 0)'), { r: 255, g: 0, b: 0, alpha: 0 });
 
 		// Path traversal & mismatched extension sanitization [Pass 2 CRIT-02 & MED-01]
@@ -435,6 +436,105 @@ async function runTests() {
 		const memeMeta = await sharp(memeBuf).metadata();
 		assert.strictEqual(memeMeta.width, 800);
 		ok('[Pass 2 CRIT-02, MED-01, HIGH-02, HIGH-03] Path-traversal filename sanitization, extension matching, and template wrapping');
+	}
+
+	// 9. Pass 3 Regression Tests: Grayscale -> Transparent (CRIT-01), EXIF Orientation Auto-Rotate (HIGH-01), and SVG rgba() Alpha Rendering (HIGH-02)
+	{
+		const node = new EditImagePlus();
+
+		function createMockCtx(params, inputItems) {
+			return {
+				getInputData: () => inputItems,
+				getNodeParameter: (name, _idx, fallback) =>
+					params[name] !== undefined ? params[name] : fallback,
+				getNode: () => ({ name: 'Edit Image+' }),
+				continueOnFail: () => false,
+				helpers: {
+					assertBinaryData: (idx, prop) => {
+						if (!inputItems[idx].binary || !inputItems[idx].binary[prop]) {
+							throw new Error(`Missing binary property "${prop}"`);
+						}
+					},
+					getBinaryDataBuffer: async (idx, prop) => inputItems[idx].binary[prop]._buf,
+					prepareBinaryData: async (buf, fileName, mimeType) => ({
+						_buf: buf,
+						fileName,
+						mimeType,
+					}),
+				},
+			};
+		}
+
+		// 9a. 1-channel Grayscale -> Transparent pipeline must not crash VipsRawLoad and must make white pixels transparent
+		const whiteImg = await sharp({
+			create: { width: 64, height: 64, channels: 3, background: { r: 255, g: 255, b: 255 } },
+		})
+			.grayscale()
+			.png()
+			.toBuffer();
+
+		const grayTransCtx = createMockCtx(
+			{
+				operation: 'multiStep',
+				dataPropertyName: 'data',
+				options: { format: 'png' },
+				operations: {
+					operations: [
+						{ operation: 'grayscale' },
+						{ operation: 'transparent', transparentColor: '#ffffff', tolerance: 10 },
+						{
+							operation: 'draw',
+							primitive: 'rectangle',
+							color: '#00ff0080',
+							startPositionX: 0,
+							startPositionY: 0,
+							endPositionX: 32,
+							endPositionY: 32,
+						},
+					],
+				},
+			},
+			[{ json: {}, binary: { data: { _buf: whiteImg } } }],
+		);
+		const [grayTransRes] = await node.execute.call(grayTransCtx);
+		const { data: gtPx, info: gtInfo } = await sharp(grayTransRes[0].binary.data._buf)
+			.ensureAlpha()
+			.raw()
+			.toBuffer({ resolveWithObject: true });
+		assert.strictEqual(gtInfo.width, 64);
+		assert.strictEqual(gtInfo.height, 64);
+		// Bottom-right pixel (63, 63) was white and untouched by the 32x32 green semi-transparent draw, so its alpha must be 0
+		const lastPixelAlpha = gtPx[(64 * 64 - 1) * 4 + 3];
+		assert.strictEqual(lastPixelAlpha, 0, 'Expected white pixel on grayscale image to become transparent (alpha=0)');
+		// Top-left pixel (0, 0) had semi-transparent green (#00ff0080 -> rgba(0, 255, 0, 0.502)) drawn over transparent canvas
+		assert(gtPx[1] > 200 && gtPx[3] > 100 && gtPx[3] < 160, `Expected semi-transparent green pixel at (0,0), got rgba(${gtPx[0]},${gtPx[1]},${gtPx[2]},${gtPx[3]})`);
+		ok('[Pass 3 CRIT-01 & HIGH-02] Grayscale -> Transparent promotes 1-channel input to 4-channel RGBA without VipsRawLoad crash & renders #RRGGBBAA SVG alpha');
+
+		// 9b. EXIF Orientation=6 (200x100 sensor -> 100x200 visual portrait) auto-orients on load
+		const rawLandscapeWithExif6 = await sharp({
+			create: { width: 200, height: 100, channels: 3, background: { r: 30, g: 120, b: 220 } },
+		})
+			.withMetadata({ orientation: 6 })
+			.jpeg()
+			.toBuffer();
+
+		const orientCtx = createMockCtx(
+			{
+				operation: 'crop',
+				dataPropertyName: 'data',
+				positionX: 0,
+				positionY: 0,
+				width: 100,
+				height: 200,
+				options: { format: 'jpeg', keepMetadata: false },
+			},
+			[{ json: {}, binary: { data: { _buf: rawLandscapeWithExif6 } } }],
+		);
+		const [orientRes] = await node.execute.call(orientCtx);
+		const orientMeta = await sharp(orientRes[0].binary.data._buf).metadata();
+		assert.strictEqual(orientMeta.width, 100, 'Expected visual width 100 after EXIF Orientation=6 auto-rotation');
+		assert.strictEqual(orientMeta.height, 200, 'Expected visual height 200 after EXIF Orientation=6 auto-rotation');
+		ok('[Pass 3 HIGH-01] Input images with EXIF Orientation > 1 are auto-oriented to visual dimensions before operations');
 	}
 
 	console.log(`\n🎉 All ${passed} test suites passed!\n`);

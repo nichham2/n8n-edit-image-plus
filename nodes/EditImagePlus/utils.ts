@@ -77,44 +77,92 @@ function byteToHex(n: number): string {
 }
 
 /**
- * Validates and sanitizes a CSS colour string (hex, rgb/rgba, or common named colour)
- * for safe interpolation inside SVG attributes.
- * Falls back to `fallback` if `color` is missing or invalid.
+ * Internal helper that parses any supported CSS colour string (#RGB, #RGBA, #RRGGBB, #RRGGBBAA,
+ * rgb(), rgba(), or named colour) into an `RgbaColor`, or returns `null` if invalid.
  */
-export function sanitizeCssColor(color: unknown, fallback: string): string {
-	if (typeof color !== 'string') return fallback;
+function parseCssColorToRgba(color: unknown): RgbaColor | null {
+	if (typeof color !== 'string') return null;
 	const trimmed = color.trim();
-	if (!trimmed) return fallback;
+	if (!trimmed) return null;
 
-	const named = NAMED_COLORS[trimmed.toLowerCase()];
-	if (named) {
-		return named;
+	const resolved = NAMED_COLORS[trimmed.toLowerCase()] ?? trimmed;
+	const hexCandidate = resolved.startsWith('#') ? resolved : `#${resolved}`;
+
+	if (HEX_COLOR_REGEX.test(hexCandidate)) {
+		const rawHex = hexCandidate.slice(1);
+		let expanded = rawHex;
+		if (rawHex.length === 3) {
+			expanded = rawHex[0] + rawHex[0] + rawHex[1] + rawHex[1] + rawHex[2] + rawHex[2];
+		} else if (rawHex.length === 4) {
+			expanded =
+				rawHex[0] +
+				rawHex[0] +
+				rawHex[1] +
+				rawHex[1] +
+				rawHex[2] +
+				rawHex[2] +
+				rawHex[3] +
+				rawHex[3];
+		}
+
+		const rParsed = parseInt(expanded.substring(0, 2), 16);
+		const gParsed = parseInt(expanded.substring(2, 4), 16);
+		const bParsed = parseInt(expanded.substring(4, 6), 16);
+		const aParsed = expanded.length === 8 ? parseInt(expanded.substring(6, 8), 16) : 255;
+
+		if (
+			!Number.isNaN(rParsed) &&
+			!Number.isNaN(gParsed) &&
+			!Number.isNaN(bParsed) &&
+			!Number.isNaN(aParsed)
+		) {
+			return {
+				r: rParsed,
+				g: gParsed,
+				b: bParsed,
+				alpha: Math.round((aParsed / 255) * 1000) / 1000,
+			};
+		}
 	}
 
-	if (HEX_COLOR_REGEX.test(trimmed)) {
-		return trimmed;
-	}
-
-	const withHash = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
-	if (HEX_COLOR_REGEX.test(withHash)) {
-		return withHash;
-	}
-
-	const rgbMatch = RGB_COLOR_REGEX.exec(trimmed);
+	const rgbMatch = RGB_COLOR_REGEX.exec(resolved);
 	if (rgbMatch) {
 		const r = Number(rgbMatch[1]);
 		const g = Number(rgbMatch[2]);
 		const b = Number(rgbMatch[3]);
 		if (r <= 255 && g <= 255 && b <= 255) {
-			if (rgbMatch[4] !== undefined) {
-				const a = Math.max(0, Math.min(1, Number(rgbMatch[4])));
-				return `#${byteToHex(r)}${byteToHex(g)}${byteToHex(b)}${byteToHex(a * 255)}`;
-			}
-			return `#${byteToHex(r)}${byteToHex(g)}${byteToHex(b)}`;
+			const a =
+				rgbMatch[4] !== undefined
+					? Math.round(Math.max(0, Math.min(1, Number(rgbMatch[4]))) * 1000) / 1000
+					: 1;
+			return { r, g, b, alpha: a };
 		}
 	}
 
-	return fallback;
+	return null;
+}
+
+/**
+ * Validates and sanitizes a CSS colour string (hex, rgb/rgba, or common named colour)
+ * for safe interpolation inside SVG 1.1 attributes (`fill`, `stroke`, `stop-color`, `flood-color`).
+ * Emits `#rrggbb` for opaque colours and `rgba(r, g, b, a)` for translucent colours (`alpha < 1`)
+ * so `librsvg` reliably renders alpha channels across all versions.
+ */
+export function sanitizeCssColor(color: unknown, fallback: string): string {
+	const parsed = parseCssColorToRgba(color);
+	if (!parsed) {
+		const fbParsed = parseCssColorToRgba(fallback);
+		if (!fbParsed) return fallback;
+		if (fbParsed.alpha < 1) {
+			return `rgba(${fbParsed.r}, ${fbParsed.g}, ${fbParsed.b}, ${fbParsed.alpha})`;
+		}
+		return `#${byteToHex(fbParsed.r)}${byteToHex(fbParsed.g)}${byteToHex(fbParsed.b)}`;
+	}
+
+	if (parsed.alpha < 1) {
+		return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${parsed.alpha})`;
+	}
+	return `#${byteToHex(parsed.r)}${byteToHex(parsed.g)}${byteToHex(parsed.b)}`;
 }
 
 /**
@@ -122,35 +170,10 @@ export function sanitizeCssColor(color: unknown, fallback: string): string {
  * to a Sharp RGBA object. Correctly preserves `00` alpha as `0` instead of coercing to `1`.
  */
 export function hexToRgba(hex: unknown, fallback = '#000000'): RgbaColor {
-	const safeColor = sanitizeCssColor(hex, fallback);
-	const safeHex = (safeColor.startsWith('#') ? safeColor : sanitizeCssColor(fallback, '#000000')).slice(1);
-	let expanded = safeHex;
-
-	if (safeHex.length === 3) {
-		expanded = safeHex[0] + safeHex[0] + safeHex[1] + safeHex[1] + safeHex[2] + safeHex[2];
-	} else if (safeHex.length === 4) {
-		expanded =
-			safeHex[0] +
-			safeHex[0] +
-			safeHex[1] +
-			safeHex[1] +
-			safeHex[2] +
-			safeHex[2] +
-			safeHex[3] +
-			safeHex[3];
-	}
-
-	const rParsed = parseInt(expanded.substring(0, 2), 16);
-	const gParsed = parseInt(expanded.substring(2, 4), 16);
-	const bParsed = parseInt(expanded.substring(4, 6), 16);
-	const aParsed = expanded.length === 8 ? parseInt(expanded.substring(6, 8), 16) : 255;
-
-	return {
-		r: Number.isNaN(rParsed) ? 0 : rParsed,
-		g: Number.isNaN(gParsed) ? 0 : gParsed,
-		b: Number.isNaN(bParsed) ? 0 : bParsed,
-		alpha: Number.isNaN(aParsed) ? 1 : Math.round((aParsed / 255) * 1000) / 1000,
-	};
+	return (
+		parseCssColorToRgba(hex) ??
+		parseCssColorToRgba(fallback) ?? { r: 0, g: 0, b: 0, alpha: 1 }
+	);
 }
 
 /**

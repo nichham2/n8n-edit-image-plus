@@ -120,8 +120,8 @@ export async function applyOperation(
 		const ovW = overlayMeta.width ?? baseW;
 		const ovH = overlayMeta.height ?? baseH;
 
-		const rawLeft = Math.round(clampNumber(op.positionX, -16384, 16384, 0));
-		const rawTop = Math.round(clampNumber(op.positionY, -16384, 16384, 0));
+		const rawLeft = Math.round(clampNumber(op.positionX, -MAX_DIMENSION, MAX_DIMENSION, 0));
+		const rawTop = Math.round(clampNumber(op.positionY, -MAX_DIMENSION, MAX_DIMENSION, 0));
 
 		// Calculate visible intersection rectangle on the base canvas
 		const srcLeft = Math.max(0, -rawLeft);
@@ -198,12 +198,12 @@ export async function applyOperation(
 		const fillColor = sanitizeCssColor(op.color, '#ff0000');
 		const strokeColor = sanitizeCssColor(op.strokeColor, '#000000');
 		const strokeWidth = clampNumber(op.strokeWidth, 0, 1000, 0);
-		const x1 = clampNumber(op.startPositionX, -16384, 16384, 0);
-		const y1 = clampNumber(op.startPositionY, -16384, 16384, 0);
-		const x2 = clampNumber(op.endPositionX, -16384, 16384, 100);
-		const y2 = clampNumber(op.endPositionY, -16384, 16384, 100);
+		const x1 = clampNumber(op.startPositionX, -MAX_DIMENSION, MAX_DIMENSION, 0);
+		const y1 = clampNumber(op.startPositionY, -MAX_DIMENSION, MAX_DIMENSION, 0);
+		const x2 = clampNumber(op.endPositionX, -MAX_DIMENSION, MAX_DIMENSION, 100);
+		const y2 = clampNumber(op.endPositionY, -MAX_DIMENSION, MAX_DIMENSION, 100);
 		const primitive = (op.primitive as string) ?? 'rectangle';
-		const cr = clampNumber(op.cornerRadius, 0, 16384, 0);
+		const cr = clampNumber(op.cornerRadius, 0, MAX_DIMENSION, 0);
 		const strokeAttr =
 			strokeWidth > 0 ? `stroke="${strokeColor}" stroke-width="${strokeWidth}"` : 'stroke="none"';
 
@@ -346,10 +346,10 @@ export async function applyOperation(
 			op.positionX === 540 && op.positionY === 540 && (imgW < 540 || imgH < 540);
 		const posX = isUntouchedDefaultCenter
 			? Math.round(imgW / 2)
-			: clampNumber(op.positionX, -16384, 16384, Math.round(imgW / 2));
+			: clampNumber(op.positionX, -MAX_DIMENSION, MAX_DIMENSION, Math.round(imgW / 2));
 		const posY = isUntouchedDefaultCenter
 			? Math.round(imgH / 2)
-			: clampNumber(op.positionY, -16384, 16384, Math.round(imgH / 2));
+			: clampNumber(op.positionY, -MAX_DIMENSION, MAX_DIMENSION, Math.round(imgH / 2));
 		const lineHeight = clampNumber(op.lineHeight, 0.5, 5, 1.4) * fontSize;
 		const shadow = Boolean(op.textShadow);
 
