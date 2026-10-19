@@ -176,3 +176,38 @@ export const nodeOperations: INodePropertyOptions[] = [
 		action: 'Add watermark',
 	},
 ];
+
+/**
+ * Operations that produce composite overlays, dimension transformations, or color-space restructures
+ * requiring downstream steps to see materialized raster data.
+ */
+export const OPS_PRODUCING_OVERLAY_OR_RESTRUCTURE = new Set<string>([
+	'border',
+	'composite',
+	'create',
+	'crop',
+	'draw',
+	'resize',
+	'rotate',
+	'sepia',
+	'shear',
+	'template',
+	'text',
+	'transparent',
+	'watermark',
+]);
+
+/**
+ * Operations that query .metadata() or require a clean baseline canvas prior to execution.
+ */
+export const OPS_REQUIRING_FRESH_METADATA_OR_BASE = new Set<string>([
+	'border',
+	'composite',
+	'crop',
+	'draw',
+	'sepia',
+	'shear',
+	'text',
+	'transparent',
+	'watermark',
+]);

@@ -95,12 +95,6 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
 
 	// Text Effects
 	const textEffect = (op.templateTextEffect as string) ?? 'default';
-	const effectColor = sanitizeCssColor(op.templateEffectColor, '#000000');
-	const effectOpacity = clampNumber(op.templateEffectOpacity, 0, 100, 50) / 100;
-	const effectBlur = clampNumber(op.templateEffectBlur, 0, 200, 4);
-	const effectOffsetX = clampNumber(op.templateEffectOffsetX, -1000, 1000, 2);
-	const effectOffsetY = clampNumber(op.templateEffectOffsetY, -1000, 1000, 2);
-	const effectOutlineWidth = clampNumber(op.templateEffectOutlineWidth, 0, 200, 2);
 
 	let customFilterSvg = '';
 	let applyFilterAttr = '';
@@ -113,18 +107,28 @@ export async function buildTemplateInstance(op: IDataObject): Promise<sharp.Shar
     </filter>`;
 		applyFilterAttr = 'filter="url(#shadow)"';
 	} else if (textEffect === 'shadow') {
+		const effectColor = sanitizeCssColor(op.templateEffectColor, '#000000');
+		const effectOpacity = clampNumber(op.templateEffectOpacity, 0, 100, 50) / 100;
+		const effectBlur = clampNumber(op.templateEffectBlur, 0, 200, 4);
+		const effectOffsetX = clampNumber(op.templateEffectOffsetX, -1000, 1000, 2);
+		const effectOffsetY = clampNumber(op.templateEffectOffsetY, -1000, 1000, 2);
 		customFilterSvg = `
     <filter id="customEffect" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="${effectOffsetX}" dy="${effectOffsetY}" stdDeviation="${effectBlur}" flood-color="${effectColor}" flood-opacity="${effectOpacity}"/>
     </filter>`;
 		applyFilterAttr = 'filter="url(#customEffect)"';
 	} else if (textEffect === 'glow') {
+		const effectColor = sanitizeCssColor(op.templateEffectColor, '#000000');
+		const effectOpacity = clampNumber(op.templateEffectOpacity, 0, 100, 50) / 100;
+		const effectBlur = clampNumber(op.templateEffectBlur, 0, 200, 4);
 		customFilterSvg = `
     <filter id="customEffect" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="0" stdDeviation="${effectBlur}" flood-color="${effectColor}" flood-opacity="${effectOpacity}"/>
     </filter>`;
 		applyFilterAttr = 'filter="url(#customEffect)"';
 	} else if (textEffect === 'outline') {
+		const effectColor = sanitizeCssColor(op.templateEffectColor, '#000000');
+		const effectOutlineWidth = clampNumber(op.templateEffectOutlineWidth, 0, 200, 2);
 		applyStrokeAttr = `stroke="${effectColor}" stroke-width="${effectOutlineWidth}" stroke-linejoin="round" paint-order="stroke fill"`;
 	}
 

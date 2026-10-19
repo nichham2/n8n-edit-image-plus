@@ -11,7 +11,12 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError, deepCopy } from 'n8n-workflow';
 import type sharp from 'sharp';
-import { DEFAULT_FONT_OPTIONS, nodeOperations } from './constants';
+import {
+	DEFAULT_FONT_OPTIONS,
+	OPS_PRODUCING_OVERLAY_OR_RESTRUCTURE,
+	OPS_REQUIRING_FRESH_METADATA_OR_BASE,
+	nodeOperations,
+} from './constants';
 import { applyOperation, buildSingleOpParams, createBlankCanvas } from './operations';
 import { nodeOperationOptions } from './properties';
 import { buildTemplateInstance } from './templateBuilder';
@@ -340,9 +345,15 @@ export class EditImagePlus implements INodeType {
 					const opName = (op.operation as string) || 'unknown';
 					try {
 						sharpInstance = await applyOperation(this, sharpInstance, op, itemIndex, stepIdx);
-						// When chaining multiple steps, materialize after each intermediate step so the next
-						// step sees accurate post-transform .metadata() and does not overwrite .composite()
-						if (operations.length > 1 && stepIdx < operations.length - 1) {
+						// Materialize intermediate buffer only when necessary: if the current operation produced
+						// an overlay/dimension change or if the subsequent operation inspects .metadata() / requires a flattened canvas
+						const nextOp = operations[stepIdx + 1];
+						const nextOpName = (nextOp?.operation as string) || '';
+						const needsMaterialization =
+							OPS_PRODUCING_OVERLAY_OR_RESTRUCTURE.has(opName) ||
+							OPS_REQUIRING_FRESH_METADATA_OR_BASE.has(nextOpName);
+
+						if (operations.length > 1 && stepIdx < operations.length - 1 && needsMaterialization) {
 							if (keepMetadata) {
 								sharpInstance = sharpInstance.withMetadata();
 							}
